@@ -1,0 +1,7 @@
+numpy
+matplotlib
+pillow
+torch
+torchvision
+tqdm
+gym[box2d]
