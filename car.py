@@ -58,14 +58,14 @@ def get_screen():
 _ = env.reset()
 
 BATCH_SIZE = 64
-GAMMA = 0.95
+GAMMA = 0.99
 EPS_START = 0.2
 EPS_END = 0.05
 EPS_DECAY = 50
 TARGET_UPDATE = 30
 MAX_EPISODE_LENGTH = 2000
 LEARNING_RATE = 5e-3
-REPLAY_MEM = 60000
+REPLAY_MEM = 100000
 
 # Get screen size so that we can initialize layers correctly based on shape
 # returned from AI gym. Typical dimensions at this point are close to 3x40x90
@@ -99,7 +99,7 @@ def select_action(state):
     
     selected_action = random.randint(0, n_actions-1)
     # Nothing, Forward, Brake, Left, Right
-    selected_action = random.choices(range(5), [0.05, 0.43, 0.004, 0.24, 0.24])[0]
+    selected_action = random.choices(range(5), [0.05, 0.45, 0.002, 0.24, 0.24])[0]
 
     if sample > eps_threshold:
         with torch.no_grad():
@@ -130,7 +130,10 @@ def plot_rewards():
 def optimize_model():
     if len(memory) < BATCH_SIZE or len(fake_memory) < BATCH_SIZE:
         return
-    transitions = memory.sample(int(BATCH_SIZE/2)) + fake_memory.sample(int(BATCH_SIZE/2))
+    if len(fake_memory) >= BATCH_SIZE:
+        transitions = memory.sample(int(BATCH_SIZE/2)) + fake_memory.sample(int(BATCH_SIZE/2))
+    else:
+        transitions = memory.sample(int(BATCH_SIZE))
     # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
     # detailed explanation). This converts batch-array of Transitions
     # to Transition of batch-arrays.
@@ -180,7 +183,7 @@ def optimize_model():
 def train():
     snapshot_dir = "snapshots"
     os.makedirs(snapshot_dir, exist_ok=True)
-    save_every = 100 # Save every 100 episodes
+    save_every = 20 # Save every 100 episodes
     global steps_done
     num_episodes = 3000
     # plt.figure()
@@ -271,7 +274,8 @@ def train():
                 consecutive_noreward = 0
 
             if(consecutive_noreward > 50):
-                reward = -200
+                if total_reward < 600:
+                    reward -= -200
                 done = True
 
             if (selected_action != fake_action_val) and fake_action_val != 0:
