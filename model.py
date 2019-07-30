@@ -20,6 +20,8 @@ class ReplayMemory(object):
             self.memory.append(None)
         self.memory[self.position] = Transition(*args)
         self.position = (self.position + 1) % self.capacity
+        if self.position%1000 == 0:
+            print(f"Memory saving at index {self.position}")
 
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
@@ -41,7 +43,7 @@ class DQN(nn.Module):
         self.bn4 = nn.BatchNorm2d(128)
 
         # Number of Linear input connections depends on output of conv2d layers
-        # and therefore the input image size, so compute it.
+        # and therefore the input image size,    so compute it.
         def conv2d_size_out(size, kernel_size = 3, stride = 2):
             return (size - (kernel_size - 1) - 1) // stride  + 1
         convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(conv2d_size_out(w))))

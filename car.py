@@ -65,7 +65,7 @@ EPS_DECAY = 50
 TARGET_UPDATE = 30
 MAX_EPISODE_LENGTH = 2000
 LEARNING_RATE = 5e-3
-REPLAY_MEM = 100000
+REPLAY_MEM = 90000
 
 # Get screen size so that we can initialize layers correctly based on shape
 # returned from AI gym. Typical dimensions at this point are close to 3x40x90
@@ -77,7 +77,11 @@ _, _, screen_height, screen_width = init_screen.shape
 n_actions = 5 #env.action_space.shape[0]
 
 policy_net = DQN(screen_height, screen_width, n_actions).to(device)
-print(policy_net)
+snapshot_dir = "snapshots"
+model_dir = "semi_successful_models"
+model_file_name = "manual30_ep40.pth"
+policy_net.load_state_dict(torch.load(f"{model_dir}/{model_file_name}"))
+policy_net.eval()
 target_net = DQN(screen_height, screen_width, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
@@ -181,7 +185,6 @@ def optimize_model():
 
 
 def train():
-    snapshot_dir = "snapshots"
     os.makedirs(snapshot_dir, exist_ok=True)
     save_every = 20 # Save every 100 episodes
     global steps_done
@@ -264,18 +267,18 @@ def train():
                 real_action[0] = 1
             # action_tensor = torch.tensor(real_action, device=device, dtype=torch.long)
             real_action_tensor = torch.tensor([[selected_action]], device=device, dtype=torch.long)
-            if fake_action_val == 0:
-                _, reward, done, _ = env.step(real_action)
-            else:
-                _, reward, done, _ = env.step(fake_action)
+            # if fake_action_val == 0:
+            _, reward, done, _ = env.step(real_action)
+            # else:
+            #     _, reward, done, _ = env.step(fake_action)
             if(reward<0):
                 consecutive_noreward += 1
             else:
                 consecutive_noreward = 0
 
             if(consecutive_noreward > 50):
-                if total_reward < 600:
-                    reward -= -200
+                if total_reward < 750:
+                    reward -= 100
                 done = True
 
             if (selected_action != fake_action_val) and fake_action_val != 0:
@@ -287,7 +290,7 @@ def train():
 
             reward = torch.tensor([reward], dtype=torch.float, device=device)
             
-            if(i_episode%1)==0:
+            if(i_episode%20 == 0) or i_episode < 100:
                 env.render()
 
             # Observe new state
@@ -301,7 +304,7 @@ def train():
             # Store the transition in memory
             # memory.push(state, fake_action_tensor, next_state, reward)
             if fake_action_val != 0:
-                fake_memory.push(state, fake_action_tensor, next_state, torch.tensor([1], dtype=torch.float, device=device))
+                fake_memory.push(state, fake_action_tensor, next_state, torch.tensor([5], dtype=torch.float, device=device))
             memory.push(state, real_action_tensor, next_state, reward)
 
             # Move to the next state
