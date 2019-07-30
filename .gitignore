@@ -1,0 +1,3 @@
+*.png
+snapshots/
+__pycache__/
