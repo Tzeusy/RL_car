@@ -5,6 +5,7 @@ import numpy as np
 from itertools import count
 from PIL import Image
 from pyglet.window import key
+from enum import Enum
 
 import torch
 import torch.optim as optim
@@ -16,6 +17,11 @@ import os
 
 from model import DQN, ReplayMemory, Transition
 from plots import plot_rewards
+
+
+class Actions(Enum):
+    NOTHING, GAS, BRAKE, LEFT, RIGHT = range(5)
+
 
 env = gym.make('CarRacing-v0').unwrapped
 env.reset()
@@ -72,7 +78,6 @@ _, _, screen_height, screen_width = init_screen.shape
 n_actions = 5  # env.action_space.shape[0]
 
 policy_net = DQN(screen_height, screen_width, n_actions).to(device)
-print(policy_net)
 target_net = DQN(screen_height, screen_width, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
 target_net.eval()
@@ -160,110 +165,54 @@ def optimize_model():
 def train():
     snapshot_dir = "snapshots"
     os.makedirs(snapshot_dir, exist_ok=True)
-    save_every = 20 # Save every 100 episodes
-    global steps_done
-    num_episodes = 3000
-    # plt.figure()
-    action_direction = ['Nothing', 'Gas', 'Brake', 'Left', 'Right']
-    
-    from pyglet.window import key
-    fake_action = np.array( [0.0, 0.0, 0.0] )
-    def key_press(k, mod):
-        print(f"Key {k} pressed")
-        global restart
-        if k==0xff0d: restart = True
-        if k==key.LEFT:  fake_action[0] = -1.0
-        if k==key.RIGHT: fake_action[0] = +1.0
-        if k==key.UP:    fake_action[1] = +1.0
-        if k==key.DOWN:  fake_action[2] = +0.8   # set 1.0 for wheels to block to zero rotation
-    def key_release(k, mod):
-        if k==key.LEFT  and fake_action[0]==-1.0: fake_action[0] = 0
-        if k==key.RIGHT and fake_action[0]==+1.0: fake_action[0] = 0
-        if k==key.UP:    fake_action[1] = 0
-        if k==key.DOWN:  fake_action[2] = 0
-    env.viewer.window.on_key_press = key_press
-    env.viewer.window.on_key_release = key_release
+    save_every = 20  # Save every 100 episodes
 
-    for i_episode in range(num_episodes):
+    fake_action = np.zeros(3)
+    fake_action_listener(env, fake_action)
+
+    episode_rewards = []
+    for i_episode in range(NUM_EPISODES):
+        global steps_done
         steps_done += 1
-        eps_threshold = EPS_END + (EPS_START - EPS_END) * \
-            math.exp(-1. * steps_done / EPS_DECAY)
         # Initialize the environment and state
-        _ = env.reset()
+        env.reset()
         start = time.time()
         
         last_screen = get_screen()
         current_screen = get_screen()
         state = current_screen - last_screen
+
         total_reward = 0
         consecutive_noreward = 0
-        action_barchart = np.zeros(n_actions)
-        
+
         for t in count():
-            fake_action_val = 0
-            if fake_action[0] == -1:
-                fake_action_val = 3
-            if fake_action[0] == 1:
-                fake_action_val = 4
-            if fake_action[1] == 1:
-                fake_action_val = 1
-            if fake_action[2] == 0.8:
-                fake_action_val = 2
-            if fake_action_val != 0:
-                print("Inputting fake action for imitation")
-            fake_action_tensor = torch.tensor([[fake_action_val]], device=device, dtype=torch.long)
-            # Select and perform an action
-            selected_action = select_action(state)
-            # print(selected_action)
-            action_barchart[selected_action] += 1
-            # if t%10 == 0:
-            #     plt.clf()
-            #     plt.pause(0.01)
-            #     plt.bar(action_direction, action_barchart)
-            #     plt.show()
-                # print(action_histogram)
-            real_action = np.zeros((3)) # Steer, gas, brake
-            real_action[1] = 0.1
-            if selected_action == 0:
-                # Do nothing
-                pass
-            if selected_action == 1:
-                # Gas only
-                real_action[1] = 1
-            elif selected_action == 2:
-                # Brake only
-                real_action[2] = 0.8
-            elif selected_action == 3:
-                # Left
-                real_action[0] = -1
-            elif selected_action == 4:
-                # Right
-                real_action[0] = 1
-            # action_tensor = torch.tensor(real_action, device=device, dtype=torch.long)
-            real_action_tensor = torch.tensor([[selected_action]], device=device, dtype=torch.long)
-            if fake_action_val == 0:
-                _, reward, done, _ = env.step(real_action)
-            else:
+            real_action_idx = select_action(state)
+            real_action = index_to_action(real_action_idx)
+
+            fake_action_idx = action_to_index(fake_action)
+            fake_action_available = fake_action_idx != Actions.NOTHING.value
+            if fake_action_available:
+                print('Inputting fake action for imitation')
+
+            if fake_action_available:
                 _, reward, done, _ = env.step(fake_action)
+            else:
+                _, reward, done, _ = env.step(real_action)
             if(reward<0):
                 consecutive_noreward += 1
             else:
                 consecutive_noreward = 0
-
             if(consecutive_noreward > 50):
                 if total_reward < 600:
                     reward -= -200
                 done = True
 
-            if (selected_action != fake_action_val) and fake_action_val != 0:
+            if (real_action_idx != fake_action_idx) and fake_action_available:
                 reward -= 5
-            elif (selected_action == fake_action_val) and fake_action_val != 0:
+            elif (real_action_idx == fake_action_idx) and fake_action_available:
                 reward += 5
-
             total_reward += reward
 
-            reward = torch.tensor([reward], dtype=torch.float, device=device)
-            
             if(i_episode%1)==0:
                 env.render()
 
@@ -276,9 +225,12 @@ def train():
                 next_state = None
 
             # Store the transition in memory
-            # memory.push(state, fake_action_tensor, next_state, reward)
-            if fake_action_val != 0:
-                fake_memory.push(state, fake_action_tensor, next_state, torch.tensor([1], dtype=torch.float, device=device))
+            reward = torch.tensor([reward], dtype=torch.float, device=device)
+            real_action_tensor = torch.tensor([[real_action_idx]], dtype=torch.long, device=device)
+            fake_action_tensor = torch.tensor([[fake_action_idx]], dtype=torch.long, device=device)
+            if fake_action_available:
+                fake_reward = torch.tensor([1], dtype=torch.float, device=device)
+                fake_memory.push(state, fake_action_tensor, next_state, fake_reward)
             memory.push(state, real_action_tensor, next_state, reward)
 
             # Move to the next state
@@ -306,6 +258,58 @@ def train():
 
     print('Complete')
     env.close()
+
+
+def fake_action_listener(env, fake_action):
+    def key_press(k, mod):
+        if k == key.LEFT:
+            fake_action[0] = -1.0
+        elif k == key.RIGHT:
+            fake_action[0] = 1.0
+        elif k == key.UP:
+            fake_action[1] = 1.0
+        elif k == key.DOWN:
+            fake_action[2] = 0.8  # set 1.0 for wheels to block to zero rotation
+
+    def key_release(k, mod):
+        if k == key.LEFT and fake_action[0] == -1.0:
+            fake_action[0] = 0
+        elif key.RIGHT and fake_action[0] == 1.0:
+            fake_action[0] = 0
+        elif k == key.UP:
+            fake_action[1] = 0.0
+        elif k == key.DOWN:
+            fake_action[2] = 0.0
+
+    env.viewer.window.on_key_press = key_press
+    env.viewer.window.on_key_release = key_release
+
+
+def index_to_action(action_index: int) -> np.ndarray:
+    action = np.zeros(3)  # steer, gas, brake
+    action[1] = 0.1
+
+    if action_index == Actions.GAS.value:
+        action[1] = 1
+    elif action_index == Actions.BRAKE.value:
+        action[2] = 0.8
+    elif action_index == Actions.LEFT.value:
+        action[0] = -1
+    elif action_index == Actions.RIGHT.value:
+        action[0] = 1
+    return action
+
+
+def action_to_index(action: np.ndarray) -> int:
+    if action[0] == -1:
+        return Actions.LEFT.value
+    if action[0] == 1:
+        return Actions.RIGHT.value
+    if action[1] == 1:
+        return Actions.GAS.value
+    if action[2] == 0.8:
+        return Actions.BREAK.value
+    return Actions.NOTHING.value
 
 
 if __name__ == "__main__":
