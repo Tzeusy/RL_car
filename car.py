@@ -2,31 +2,25 @@ import gym
 import math
 import random
 import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
 from itertools import count
 from PIL import Image
+from pyglet.window import key
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.transforms as T
 
 import time
 import os
-import sys
 
 from model import DQN, ReplayMemory, Transition
+from plots import plot_rewards
 
 env = gym.make('CarRacing-v0').unwrapped
+env.reset()
 
-# set up matplotlib
-is_ipython = 'inline' in matplotlib.get_backend()
-if is_ipython:
-    from IPython import display
 
-plt.ion()
 torch.manual_seed(0)
 np.random.seed(0)
 random.seed(0)
@@ -36,6 +30,7 @@ torch.backends.cudnn.benchmark = False
 # if gpu is to be used
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cuda")
+
 
 def get_screen():
     resize = T.Compose([T.ToPILImage(),
@@ -55,7 +50,6 @@ def get_screen():
     # Resize, and add a batch dimension (BCHW)
     return resize(screen).unsqueeze(0).to(device)
 
-_ = env.reset()
 
 BATCH_SIZE = 64
 GAMMA = 0.99
@@ -63,9 +57,10 @@ EPS_START = 0.2
 EPS_END = 0.05
 EPS_DECAY = 50
 TARGET_UPDATE = 30
-MAX_EPISODE_LENGTH = 2000
+NUM_EPISODES = 3_000
+MAX_EPISODE_LENGTH = 2_000
 LEARNING_RATE = 5e-3
-REPLAY_MEM = 100000
+REPLAY_MEM = 100_000
 
 # Get screen size so that we can initialize layers correctly based on shape
 # returned from AI gym. Typical dimensions at this point are close to 3x40x90
@@ -74,7 +69,7 @@ init_screen = get_screen()
 _, _, screen_height, screen_width = init_screen.shape
 
 # Get number of actions from gym action space
-n_actions = 5 #env.action_space.shape[0]
+n_actions = 5  # env.action_space.shape[0]
 
 policy_net = DQN(screen_height, screen_width, n_actions).to(device)
 print(policy_net)
@@ -89,15 +84,13 @@ fake_memory = ReplayMemory(REPLAY_MEM)
 
 steps_done = 0
 
-episode_rewards = []
 
 def select_action(state):
-    global steps_done
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
         math.exp(-1. * steps_done / EPS_DECAY)
     
-    selected_action = random.randint(0, n_actions-1)
+    # selected_action = random.randint(0, n_actions-1)
     # Nothing, Forward, Brake, Left, Right
     selected_action = random.choices(range(5), [0.05, 0.45, 0.002, 0.24, 0.24])[0]
 
@@ -111,29 +104,13 @@ def select_action(state):
     return selected_action
 
 
-def plot_rewards():
-    plt.figure()
-    plt.clf()
-    rewards_t = torch.tensor(episode_rewards, dtype=torch.float)
-    plt.title('Training...')
-    plt.xlabel('Episode')
-    plt.ylabel('Rewards')
-    plt.plot(rewards_t.numpy())
-    # Take 100 episode averages and plot them too
-    if len(rewards_t) >= 100:
-        means = rewards_t.unfold(0, 100, 1).mean(1).view(-1)
-        means = torch.cat((torch.zeros(99), means))
-        plt.plot(means.numpy())
-    plt.savefig(f"./car_{LEARNING_RATE}_{REPLAY_MEM}.png")
-    plt.close('all')
-
 def optimize_model():
     if len(memory) < BATCH_SIZE or len(fake_memory) < BATCH_SIZE:
         return
     if len(fake_memory) >= BATCH_SIZE:
-        transitions = memory.sample(int(BATCH_SIZE/2)) + fake_memory.sample(int(BATCH_SIZE/2))
+        transitions = memory.sample(BATCH_SIZE // 2) + fake_memory.sample(BATCH_SIZE // 2)
     else:
-        transitions = memory.sample(int(BATCH_SIZE))
+        transitions = memory.sample(BATCH_SIZE)
     # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
     # detailed explanation). This converts batch-array of Transitions
     # to Transition of batch-arrays.
@@ -141,10 +118,10 @@ def optimize_model():
 
     # Compute a mask of non-final states and concatenate the batch elements
     # (a final state would've been the one after which simulation ended)
-    non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
-                                          batch.next_state)), device=device, dtype=torch.uint8)
-    non_final_next_states = torch.cat([s for s in batch.next_state
-                                                if s is not None])
+    non_final_mask = torch.tensor([s is not None for s in batch.next_state],
+                                  dtype=torch.uint8, device=device)
+    non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
+
     state_batch = torch.cat(batch.state)
     action_batch = torch.cat(batch.action)
     reward_batch = torch.cat(batch.reward)
@@ -315,22 +292,20 @@ def train():
                 print(f"Episode {i_episode} with {t} length took {time.time()-start}s and scored {total_reward}")
                 episode_rewards.append(total_reward)
                 if i_episode % 20 == 0:
-                    plot_rewards()
+                    plot_rewards(episode_rewards, save_name=f'car_{LEARNING_RATE}_{REPLAY_MEM}')
                 break
+
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
             target_net.load_state_dict(policy_net.state_dict())
 
         current_reward = np.mean(episode_rewards[-100:-1])
-
         if i_episode % save_every == 0 and i_episode > 0:
-            torch.save(target_net.state_dict(), f"{snapshot_dir}/target_episode{i_episode}_reward_{current_reward:.3f}.pth")
+            filename = f'{snapshot_dir}/target_episode{i_episode}_reward_{current_reward:.3f}.pth'
+            torch.save(target_net.state_dict(), filename)
 
     print('Complete')
-    # env.render()
     env.close()
-    plt.ioff()
-    plt.show()
 
 
 if __name__ == "__main__":
