@@ -1,6 +1,5 @@
-venv/
+*.png
 __pycache__/
-
 plots/
 snapshots/
-
+venv/
