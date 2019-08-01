@@ -1,3 +1,4 @@
 *.png
 snapshots/
 __pycache__/
+venv/

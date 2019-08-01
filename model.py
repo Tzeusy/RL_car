@@ -64,3 +64,15 @@ class DQN(nn.Module):
         x = self.head_2(x)
         return x
 
+
+class Player(object):
+    def __init__(self, env, policy_net, target_net, optimizer, scheduler, memory, fake_memory, state=None):
+        self.env = env
+        self.policy_net = policy_net
+        self.target_net = target_net
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.memory = memory
+        self.fake_memory = fake_memory
+        self.state = state
+
