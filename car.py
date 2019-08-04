@@ -16,10 +16,9 @@ import torchvision.transforms as T
 import time
 import os
 import sys
+import cv2
 
-from model import DQN, ReplayMemory, Transition
-
-env = gym.make('CarRacing-v0').unwrapped
+from model import DQN, ReplayMemory, Transition, Player
 
 # set up matplotlib
 is_ipython = 'inline' in matplotlib.get_backend()
@@ -27,6 +26,7 @@ if is_ipython:
     from IPython import display
 
 plt.ion()
+
 torch.manual_seed(0)
 np.random.seed(0)
 random.seed(0)
@@ -34,28 +34,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # if gpu is to be used
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cuda")
-
-def get_screen():
-    resize = T.Compose([T.ToPILImage(),
-                        T.Resize(40, interpolation=Image.CUBIC),
-                        T.ToTensor()])
-
-    # Returned screen requested by gym is 400x600x3, but is sometimes larger
-    # such as 800x1200x3. Transpose it into torch order (CHW).
-    screen = env.render(mode='rgb_array').transpose((2, 0, 1))
-    # Cart is in the lower half, so strip off the top and bottom of the screen
-    _, screen_height, screen_width = screen.shape
-
-    # Convert to float, rescale, convert to torch tensor
-    # (this doesn't require a copy)
-    screen = np.ascontiguousarray(screen, dtype=np.float32) / 255
-    screen = torch.from_numpy(screen)
-    # Resize, and add a batch dimension (BCHW)
-    return resize(screen).unsqueeze(0).to(device)
-
-_ = env.reset()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 BATCH_SIZE = 64
 GAMMA = 0.99
@@ -66,36 +45,104 @@ TARGET_UPDATE = 30
 MAX_EPISODE_LENGTH = 2000
 LEARNING_RATE = 5e-3
 REPLAY_MEM = 90000
-
-# Get screen size so that we can initialize layers correctly based on shape
-# returned from AI gym. Typical dimensions at this point are close to 3x40x90
-# which is the result of a clamped and down-scaled render buffer in get_screen()
-init_screen = get_screen()
-_, _, screen_height, screen_width = init_screen.shape
+snapshot_dir = "snapshots"
 
 # Get number of actions from gym action space
 n_actions = 5 #env.action_space.shape[0]
 
-policy_net = DQN(screen_height, screen_width, n_actions).to(device)
-snapshot_dir = "snapshots"
-model_dir = "semi_successful_models"
-model_file_name = "manual30_ep40.pth"
-policy_net.load_state_dict(torch.load(f"{model_dir}/{model_file_name}"))
-policy_net.eval()
-target_net = DQN(screen_height, screen_width, n_actions).to(device)
-target_net.load_state_dict(policy_net.state_dict())
-target_net.eval()
-
-optimizer = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE, weight_decay=1e-6)
-scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9999999)
-memory = ReplayMemory(REPLAY_MEM)
-fake_memory = ReplayMemory(REPLAY_MEM)
-
 steps_done = 0
-
 episode_rewards = []
 
-def select_action(state):
+resize = T.Compose([T.ToPILImage(),
+                    T.Resize(40, interpolation=Image.CUBIC),
+                    T.ToTensor()])
+
+def create_env():
+    env = gym.make('CarRacing-v0').unwrapped
+    env.mode = 'fast'
+    env.seed(0)
+    return env
+
+def get_screen(env, player=None):
+    if player:
+        env = player.env
+
+    start = time.time()
+    # Returned screen requested by gym is 400x600x3, but is sometimes larger
+    # such as 800x1200x3. Transpose it into torch order (CHW).
+    screen = env.render(mode='rgb_array').transpose((2, 0, 1))
+    # Cart is in the lower half, so strip off the top and bottom of the screen
+    _, screen_height, screen_width = screen.shape
+
+    if player:
+        player.screen = screen
+
+    # Convert to float, rescale, convert to torch tensor
+    # (this doesn't require a copy)
+    screen = np.ascontiguousarray(screen, dtype=np.float32) / 255
+
+    screen = torch.from_numpy(screen)
+    # Resize, and add a batch dimension (BCHW)
+    screen = resize(screen).unsqueeze(0).to(device)
+
+    print("{:.3f}s taken for get_screen".format(time.time() - start))
+    return screen
+
+def display_screens(players):
+    start = time.time()
+
+    full_screen = None
+
+    for player in players:
+        screen = player.screen #.env.render(mode='rgb_array') #.transpose((1, 0, 2))
+        print(screen.shape)
+
+        if full_screen is None:
+            full_screen = screen
+        else:
+            border_width = 10
+            height = full_screen.shape[1]
+            border = np.zeros((3, height, border_width), dtype=np.uint8)
+
+            full_screen = np.concatenate((full_screen, border, screen), axis=2)
+
+    # TODO: Rewrite this to display in whatever UI library is being used
+    full_screen = full_screen.transpose((1, 2, 0))
+    full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
+    cv2.imshow('image', full_screen)
+
+    print("Time taken to render: {:.3f}s".format(time.time() - start))
+
+def create_player(load_weights=True):
+    env = create_env()
+    env.reset()
+
+    # Get screen size so that we can initialize layers correctly based on shape
+    # returned from AI gym. Typical dimensions at this point are close to 3x40x90
+    # which is the result of a clamped and down-scaled render buffer in get_screen()
+    init_screen = get_screen(env)
+    _, _, screen_height, screen_width = init_screen.shape
+
+    policy_net = DQN(screen_height, screen_width, n_actions).to(device)
+    model_dir = "semi_successful_models"
+    model_file_name = "manual30_ep40.pth"
+    policy_net.eval()
+    target_net = DQN(screen_height, screen_width, n_actions).to(device)
+    target_net.eval()
+
+    if load_weights:
+        policy_net.load_state_dict(torch.load(f"{model_dir}/{model_file_name}", map_location='cpu'))
+        target_net.load_state_dict(policy_net.state_dict())
+
+    optimizer = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE, weight_decay=1e-6)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9999999)
+    memory = ReplayMemory(REPLAY_MEM)
+    fake_memory = ReplayMemory(REPLAY_MEM)
+
+    player = Player(env, policy_net, target_net, optimizer, scheduler, memory, fake_memory)
+    return player
+
+def select_action(player, state):
     global steps_done
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
@@ -110,10 +157,9 @@ def select_action(state):
             # t.max(1) will return largest column value of each row.
             # second column on max result is index of where max element was
             # found, so we pick action with the larger expected reward.
-            selected_action = policy_net(state).max(1)[1].item()
+            selected_action = player.policy_net(player.state).max(1)[1].item()
 
     return selected_action
-
 
 def plot_rewards():
     plt.figure()
@@ -131,13 +177,13 @@ def plot_rewards():
     plt.savefig(f"./car_{LEARNING_RATE}_{REPLAY_MEM}.png")
     plt.close('all')
 
-def optimize_model():
-    if len(memory) < BATCH_SIZE or len(fake_memory) < BATCH_SIZE:
+def optimize_model(player):
+    if len(player.memory) < BATCH_SIZE or len(player.fake_memory) < BATCH_SIZE:
         return
-    if len(fake_memory) >= BATCH_SIZE:
-        transitions = memory.sample(int(BATCH_SIZE/2)) + fake_memory.sample(int(BATCH_SIZE/2))
+    if len(player.fake_memory) >= BATCH_SIZE:
+        transitions = player.memory.sample(int(BATCH_SIZE/2)) + player.fake_memory.sample(int(BATCH_SIZE/2))
     else:
-        transitions = memory.sample(int(BATCH_SIZE))
+        transitions = player.memory.sample(int(BATCH_SIZE))
     # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
     # detailed explanation). This converts batch-array of Transitions
     # to Transition of batch-arrays.
@@ -156,19 +202,19 @@ def optimize_model():
     # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
     # columns of actions taken. These are the actions which would've been taken
     # for each batch state according to policy_net
-    state_action_values = policy_net(state_batch).gather(1, action_batch)
+    state_action_values = player.policy_net(state_batch).gather(1, action_batch)
 
     # Compute V(s_{t+1}) for all next states.
     # Expected values of actions for non_final_next_states are computed based
     # on the "older" target_net; selecting their best reward with max(1)[0].
     # This is merged based on the mask, such that we'll have either the expected
     # state value or 0 in case the state was final.
+
     next_state_values = torch.zeros(BATCH_SIZE, device=device)
-    # print(target_net(non_final_next_states).size()) # [128, 4]
-    max_idx = policy_net(non_final_next_states).max(1)[1]
+    max_idx = player.policy_net(non_final_next_states).max(1)[1]
 
     # DDQN
-    next_state_values[non_final_mask] = torch.gather(target_net(non_final_next_states), dim=1, index=max_idx[:, None]).squeeze()
+    next_state_values[non_final_mask] = torch.gather(player.target_net(non_final_next_states), dim=1, index=max_idx[:, None]).squeeze()
     # Compute the expected Q values
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
@@ -176,22 +222,27 @@ def optimize_model():
     loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
 
     # Optimize the model
-    optimizer.zero_grad()
+    player.optimizer.zero_grad()
     loss.backward()
-    for param in policy_net.parameters():
+    for param in player.policy_net.parameters():
         param.grad.data.clamp_(-1, 1)
-    optimizer.step()
-    scheduler.step()
+    player.optimizer.step()
+    player.scheduler.step()
 
 
 def train():
     os.makedirs(snapshot_dir, exist_ok=True)
     save_every = 20 # Save every 100 episodes
+    display_interval = 2 # Display every 50 episodes
     global steps_done
     num_episodes = 3000
     # plt.figure()
     action_direction = ['Nothing', 'Gas', 'Brake', 'Left', 'Right']
+
+    player1 = create_player()
+    player2 = create_player(load_weights=False)
     
+    # TODO: Fix this hacky piece of code
     from pyglet.window import key
     fake_action = np.array( [0.0, 0.0, 0.0] )
     def key_press(k, mod):
@@ -207,130 +258,150 @@ def train():
         if k==key.RIGHT and fake_action[0]==+1.0: fake_action[0] = 0
         if k==key.UP:    fake_action[1] = 0
         if k==key.DOWN:  fake_action[2] = 0
-    env.viewer.window.on_key_press = key_press
-    env.viewer.window.on_key_release = key_release
+    player1.env.viewer.window.on_key_press = key_press
+    player1.env.viewer.window.on_key_release = key_release
+
+    players = [player1, player2]
 
     for i_episode in range(num_episodes):
         steps_done += 1
-        eps_threshold = EPS_END + (EPS_START - EPS_END) * \
-            math.exp(-1. * steps_done / EPS_DECAY)
-        # Initialize the environment and state
-        _ = env.reset()
+
+        for player in players: # Execute for each player
+            env = player.env
+            # Initialize the environment and state
+            env.seed(i_episode)
+            _ = env.reset()
+
         start = time.time()
         
-        last_screen = get_screen()
-        current_screen = get_screen()
-        state = current_screen - last_screen
-        total_reward = 0
-        consecutive_noreward = 0
-        action_barchart = np.zeros(n_actions)
-        
+        for player in players:
+            env = player.env
+            last_screen = get_screen(env, player)
+            current_screen = get_screen(env, player)
+            player.state = current_screen - last_screen
+
+            player.total_reward = 0  # TODO: Update to be playerwise
+            player.consecutive_noreward = 0
+            # action_barchart = np.zeros(n_actions)
+
+        # Keeps track of which players are done with the current episode
+        player_done = [False for p in players]
         for t in count():
-            fake_action_val = 0
-            if fake_action[0] == -1:
-                fake_action_val = 3
-            if fake_action[0] == 1:
-                fake_action_val = 4
-            if fake_action[1] == 1:
-                fake_action_val = 1
-            if fake_action[2] == 0.8:
-                fake_action_val = 2
-            if fake_action_val != 0:
-                print("Inputting fake action for imitation")
-            fake_action_tensor = torch.tensor([[fake_action_val]], device=device, dtype=torch.long)
-            # Select and perform an action
-            selected_action = select_action(state)
-            # print(selected_action)
-            action_barchart[selected_action] += 1
-            # if t%10 == 0:
-            #     plt.clf()
-            #     plt.pause(0.01)
-            #     plt.bar(action_direction, action_barchart)
-            #     plt.show()
-                # print(action_histogram)
-            real_action = np.zeros((3)) # Steer, gas, brake
-            real_action[1] = 0.1
-            if selected_action == 0:
-                # Do nothing
-                pass
-            if selected_action == 1:
-                # Gas only
-                real_action[1] = 1
-            elif selected_action == 2:
-                # Brake only
-                real_action[2] = 0.8
-            elif selected_action == 3:
-                # Left
-                real_action[0] = -1
-            elif selected_action == 4:
-                # Right
-                real_action[0] = 1
-            # action_tensor = torch.tensor(real_action, device=device, dtype=torch.long)
-            real_action_tensor = torch.tensor([[selected_action]], device=device, dtype=torch.long)
-            # if fake_action_val == 0:
-            _, reward, done, _ = env.step(real_action)
-            # else:
-            #     _, reward, done, _ = env.step(fake_action)
-            if(reward<0):
-                consecutive_noreward += 1
-            else:
-                consecutive_noreward = 0
-
-            if(consecutive_noreward > 50):
-                if total_reward < 750:
-                    reward -= 100
-                done = True
-
-            if (selected_action != fake_action_val) and fake_action_val != 0:
-                reward -= 5
-            elif (selected_action == fake_action_val) and fake_action_val != 0:
-                reward += 5
-
-            total_reward += reward
-
-            reward = torch.tensor([reward], dtype=torch.float, device=device)
-            
-            if(i_episode%20 == 0) or i_episode < 100:
-                env.render()
-
-            # Observe new state
-            last_screen = current_screen
-            current_screen = get_screen()
-            if not done:
-                next_state = current_screen - last_screen
-            else:
-                next_state = None
-
-            # Store the transition in memory
-            # memory.push(state, fake_action_tensor, next_state, reward)
-            if fake_action_val != 0:
-                fake_memory.push(state, fake_action_tensor, next_state, torch.tensor([5], dtype=torch.float, device=device))
-            memory.push(state, real_action_tensor, next_state, reward)
-
-            # Move to the next state
-            state = next_state
-
-            # Perform one step of the optimization (on the target network)
-            optimize_model()
-
-            if (done or t > MAX_EPISODE_LENGTH):
-                state = None
-                print(f"Episode {i_episode} with {t} length took {time.time()-start}s and scored {total_reward}")
-                episode_rewards.append(total_reward)
-                if i_episode % 20 == 0:
-                    plot_rewards()
+            if all(player_done):
                 break
+
+            for player_i, player in enumerate(players):
+                if player_done[player_i]:
+                    continue
+
+                env = player.env
+
+                fake_action_val = 0
+                if fake_action[0] == -1:
+                    fake_action_val = 3
+                if fake_action[0] == 1:
+                    fake_action_val = 4
+                if fake_action[1] == 1:
+                    fake_action_val = 1
+                if fake_action[2] == 0.8:
+                    fake_action_val = 2
+                if fake_action_val != 0:
+                    print("Inputting fake action for imitation")
+                fake_action_tensor = torch.tensor([[fake_action_val]], device=device, dtype=torch.long)
+
+                # Select and perform an action
+                selected_action = select_action(player, player.state)
+
+                real_action = np.zeros((3)) # Steer, gas, brake
+                real_action[1] = 0.1
+                if selected_action == 0:
+                    # Do nothing
+                    pass
+                if selected_action == 1:
+                    # Gas only
+                    real_action[1] = 1
+                elif selected_action == 2:
+                    # Brake only
+                    real_action[2] = 0.8
+                elif selected_action == 3:
+                    # Left
+                    real_action[0] = -1
+                elif selected_action == 4:
+                    # Right
+                    real_action[0] = 1
+
+                # action_tensor = torch.tensor(real_action, device=device, dtype=torch.long)
+                real_action_tensor = torch.tensor([[selected_action]], device=device, dtype=torch.long)
+                # if fake_action_val == 0:
+                _, reward, done, _ = env.step(real_action)
+                # else:
+                #     _, reward, done, _ = env.step(fake_action)
+
+                if(reward<0):
+                    player.consecutive_noreward += 1
+                else:
+                    player.consecutive_noreward = 0
+
+                if(player.consecutive_noreward > 50):
+                    if player.total_reward < 750:
+                        reward -= 100
+                    done = True
+
+                if (selected_action != fake_action_val) and fake_action_val != 0:
+                    reward -= 5
+                elif (selected_action == fake_action_val) and fake_action_val != 0:
+                    reward += 5
+
+                player.total_reward += reward
+
+                reward = torch.tensor([reward], dtype=torch.float, device=device)
+                
+                if(i_episode % display_interval == 0):# or i_episode < 100:
+                    display_screens(players)
+
+                # Observe new state
+                last_screen = current_screen
+                current_screen = get_screen(env, player)
+
+                if not done:
+                    next_state = current_screen - last_screen
+                else:
+                    next_state = None
+
+                # Store the transition in memory
+                # memory.push(state, fake_action_tensor, next_state, reward)
+                if fake_action_val != 0:
+                    player.fake_memory.push(player.state, fake_action_tensor, next_state, torch.tensor([5], dtype=torch.float, device=device))
+                player.memory.push(player.state, real_action_tensor, next_state, reward)
+
+                # Move to the next state
+                player.state = next_state
+
+                # Perform one step of the optimization (on the target network)
+                optimize_model(player)
+
+                if (done or t > MAX_EPISODE_LENGTH):
+                    player.state = None
+                    print(f"Episode {i_episode} with {t} length took {time.time()-start}s and scored {player.total_reward}")
+
+                    # Only track rewards for user
+                    if player == player1:
+                        episode_rewards.append(player.total_reward)
+    
+                    player_done[player_i] = True
+
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
-            target_net.load_state_dict(policy_net.state_dict())
+            for player in players:
+                player.target_net.load_state_dict(player.policy_net.state_dict())
 
         current_reward = np.mean(episode_rewards[-100:-1])
 
+        # Save for user
         if i_episode % save_every == 0 and i_episode > 0:
-            torch.save(target_net.state_dict(), f"{snapshot_dir}/target_episode{i_episode}_reward_{current_reward:.3f}.pth")
+            torch.save(player1.target_net.state_dict(), f"{snapshot_dir}/target_episode{i_episode}_reward_{current_reward:.3f}.pth")
 
     print('Complete')
-    # env.render()
     env.close()
     plt.ioff()
     plt.show()
