@@ -76,3 +76,7 @@ class Player(object):
         self.fake_memory = fake_memory
         self.state = state
 
+        self.consecutive_noreward = 0
+        self.total_reward = 0
+        self.screen = None
+
