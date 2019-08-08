@@ -79,4 +79,5 @@ class Player(object):
         self.consecutive_noreward = 0
         self.total_reward = 0
         self.screen = None
+        self.screen_tensor = None
 

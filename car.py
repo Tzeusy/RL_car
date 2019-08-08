@@ -84,7 +84,7 @@ def get_screen(env, player=None):
     # Resize, and add a batch dimension (BCHW)
     screen = resize(screen).unsqueeze(0).to(device)
 
-    print("{:.3f}s taken for get_screen".format(time.time() - start))
+    # print("{:.3f}s taken for get_screen".format(time.time() - start))
     return screen
 
 
@@ -94,8 +94,7 @@ def display_screens(players):
     full_screen = None
 
     for player in players:
-        screen = player.screen  #.env.render(mode='rgb_array') #.transpose((1, 0, 2))
-        print(screen.shape)
+        screen = player.screen #.env.render(mode='rgb_array') #.transpose((1, 0, 2))
 
         if full_screen is None:
             full_screen = screen
@@ -214,6 +213,66 @@ def optimize_model(player):
     player.optimizer.step()
     player.scheduler.step()
 
+def step_player(player, player_done, fake_action):
+    env = player.env
+    real_action_idx = select_action(player, player.state)
+    real_action = index_to_action(real_action_idx)
+
+    fake_action_idx = action_to_index(fake_action)
+    fake_action_available = fake_action_idx != Actions.NOTHING.value
+    if fake_action_available:
+        print("Inputting fake action for imitation")
+
+    # if not fake_action_available:
+    _, reward, done, _ = env.step(real_action)
+    # else:
+    #     _, reward, done, _ = env.step(fake_action)
+
+    if(reward<0):
+        player.consecutive_noreward += 1
+    else:
+        player.consecutive_noreward = 0
+
+    if(player.consecutive_noreward > 50):
+        if player.total_reward < 750:
+            reward -= 100
+        done = True
+
+    if fake_action_available:
+        if real_action_idx == fake_action_idx:
+            reward += 5
+        else:
+            reward -= 5
+    player.total_reward += reward
+
+    if(i_episode % display_interval == 0):# or i_episode < 100:
+        display_screens(players)
+
+    # Observe new state
+    last_screen = current_screen
+    current_screen = get_screen(env, player)
+
+    if not done:
+        next_state = current_screen - last_screen
+    else:
+        next_state = None
+
+    # Store the transition in memory
+    reward = torch.tensor([reward], dtype=torch.float, device=device)
+    real_action_tensor = torch.tensor([[real_action_idx]], dtype=torch.long, device=device)
+    fake_action_tensor = torch.tensor([[fake_action_idx]], dtype=torch.long, device=device)
+    if fake_action_available:
+        fake_reward = torch.tensor([5], dtype=torch.float, device=device)
+        player.fake_memory.push(player.state, fake_action_tensor, next_state, fake_reward)
+    player.memory.push(player.state, real_action_tensor, next_state, reward)
+
+    # Move to the next state
+    player.state = next_state
+
+    # Perform one step of the optimization (on the target network)
+    optimize_model(player)
+
+    return done
 
 def train():
     os.makedirs(snapshot_dir, exist_ok=True)
@@ -246,6 +305,7 @@ def train():
             last_screen = get_screen(env, player)
             current_screen = get_screen(env, player)
             player.state = current_screen - last_screen
+            player.screen_tensor = current_screen
 
             player.total_reward = 0  # TODO: Update to be playerwise
             player.consecutive_noreward = 0
@@ -260,75 +320,22 @@ def train():
             for player_i, player in enumerate(players):
                 if player_done[player_i]:
                     continue
-
-                env = player.env
-                real_action_idx = select_action(player, player.state)
-                real_action = index_to_action(real_action_idx)
-
-                fake_action_idx = action_to_index(fake_action)
-                fake_action_available = fake_action_idx != Actions.NOTHING.value
-                if fake_action_available:
-                    print("Inputting fake action for imitation")
-
-                # if not fake_action_available:
-                _, reward, done, _ = env.step(real_action)
-                # else:
-                #     _, reward, done, _ = env.step(fake_action)
-
-                if(reward<0):
-                    player.consecutive_noreward += 1
-                else:
-                    player.consecutive_noreward = 0
-
-                if(player.consecutive_noreward > 50):
-                    if player.total_reward < 750:
-                        reward -= 100
-                    done = True
-
-                if fake_action_available:
-                    if real_action_idx == fake_action_idx:
-                        reward += 5
-                    else:
-                        reward -= 5
-                player.total_reward += reward
-
-                if(i_episode % display_interval == 0):# or i_episode < 100:
-                    display_screens(players)
-
-                # Observe new state
-                last_screen = current_screen
-                current_screen = get_screen(env, player)
-
-                if not done:
-                    next_state = current_screen - last_screen
-                else:
-                    next_state = None
-
-                # Store the transition in memory
-                reward = torch.tensor([reward], dtype=torch.float, device=device)
-                real_action_tensor = torch.tensor([[real_action_idx]], dtype=torch.long, device=device)
-                fake_action_tensor = torch.tensor([[fake_action_idx]], dtype=torch.long, device=device)
-                if fake_action_available:
-                    fake_reward = torch.tensor([5], dtype=torch.float, device=device)
-                    player.fake_memory.push(player.state, fake_action_tensor, next_state, fake_reward)
-                player.memory.push(player.state, real_action_tensor, next_state, reward)
-
-                # Move to the next state
-                player.state = next_state
-
-                # Perform one step of the optimization (on the target network)
-                optimize_model(player)
+                done = step_player(player, player_done, fake_action)
 
                 if (done or t > MAX_EPISODE_LENGTH):
                     player.state = None
                     print(f"Episode {i_episode} with {t} length took {time.time()-start}s "
                           f"and scored {player.total_reward}")
 
-                    # Only track rewards for user
-                    if player == player1:
-                        episode_rewards.append(player.total_reward)
-    
+                    # # Only track rewards for user
+                    # if player == player1:
+                    #     episode_rewards.append(player.total_reward)
+
                     player_done[player_i] = True
+
+
+            if i_episode % display_interval == 0: # or i_episode < 100:
+                display_screens(players)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
