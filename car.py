@@ -323,7 +323,7 @@ def train():
     player1 = create_player()
     player2 = create_player(load_weights=False)
     player2.model_keras = None
-    players = [player1, player2]
+    players = [player1]#, player2]
 
     fake_action = np.zeros(3)
     fake_action_listener(player1.env, fake_action)
@@ -370,8 +370,8 @@ def train():
 
                     player_done[player_i] = True
 
-            # if i_episode % display_interval == 0: # or i_episode < 100:
-            #     display_screens(players)
+            if i_episode % display_interval == 0: # or i_episode < 100:
+                display_screens(players)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
