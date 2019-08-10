@@ -199,7 +199,9 @@ def select_action(player, state):
             screen_output /= np.max(screen_output)
 
             display = np.concatenate((lrp_output, screen_output), axis=1)
-            scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
+            display = Image.fromarray((display * 255).astype(np.uint8))
+            display.save(f"output_{num_photos // save_interval}.png")
+            # scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
 
     return selected_action
 
