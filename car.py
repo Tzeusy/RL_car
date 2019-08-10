@@ -245,11 +245,8 @@ def step_player(player, player_done, fake_action):
             reward -= 5
     player.total_reward += reward
 
-    if(i_episode % display_interval == 0):# or i_episode < 100:
-        display_screens(players)
-
     # Observe new state
-    last_screen = current_screen
+    last_screen = player.screen_tensor
     current_screen = get_screen(env, player)
 
     if not done:
