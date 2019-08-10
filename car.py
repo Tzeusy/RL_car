@@ -19,6 +19,28 @@ from enum import Enum
 from model import DQN, ReplayMemory, Transition, Player
 from plots import plot_rewards
 
+import keras
+import innvestigate
+import scipy.misc
+
+def innvestigate_input(model, input: np.ndarray):
+    """
+    :param model: Keras model
+    :param input: 4-D numpy array of shape [n, h, w, c]
+    """
+    name = {
+        0: 'lrp.sequential_preset_a_flat',
+        1: 'guided_backprop',
+        2: 'gradient',
+    }[0]
+    analyzer = innvestigate.create_analyzer(name, model)
+    a = analyzer.analyze(input)
+
+    # aggregate along color channels and normalize to [-1, 1]
+    a = a.sum(axis=np.argmax(np.asarray(a.shape) == 3))
+    a /= np.max(np.abs(a))
+    return a
+
 
 class Actions(Enum):
     NOTHING, GAS, BRAKE, LEFT, RIGHT = range(5)
@@ -48,6 +70,7 @@ snapshot_dir = "snapshots"
 n_actions = 5  # env.action_space.shape[0]
 
 steps_done = 0
+num_photos = 0
 episode_rewards = []
 
 resize = T.Compose([T.ToPILImage(),
@@ -121,7 +144,7 @@ def create_player(load_weights=True):
     # returned from AI gym. Typical dimensions at this point are close to 3x40x90
     # which is the result of a clamped and down-scaled render buffer in get_screen()
     init_screen = get_screen(env)
-    _, _, screen_height, screen_width = init_screen.shape
+    _, n_channels, screen_height, screen_width = init_screen.shape # 3, 40, 60
 
     policy_net = DQN(screen_height, screen_width, n_actions).to(device)
     model_dir = "semi_successful_models"
@@ -142,7 +165,6 @@ def create_player(load_weights=True):
     player = Player(env, policy_net, target_net, optimizer, scheduler, memory, fake_memory)
     return player
 
-
 def select_action(player, state):
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
@@ -158,6 +180,26 @@ def select_action(player, state):
             # second column on max result is index of where max element was
             # found, so we pick action with the larger expected reward.
             selected_action = player.policy_net(player.state).max(1)[1].item()
+
+    if player.model_keras:
+        global num_photos
+        num_photos += 1
+        save_interval = 1
+
+        if num_photos % save_interval == 0:
+            player_state = player.state.cpu().numpy()
+            output = innvestigate_input(player.model_keras, player_state)  # shape [n, h, w, c]
+
+            # Normalize
+            lrp_output = np.repeat(output[0][:,:,np.newaxis], repeats=3, axis=2)
+            lrp_output -= np.min(lrp_output)
+            lrp_output /= np.max(lrp_output)
+            screen_output = player.screen_tensor[0,:].cpu().numpy().transpose(1, 2, 0)
+            screen_output -= np.min(screen_output)
+            screen_output /= np.max(screen_output)
+
+            display = np.concatenate((lrp_output, screen_output), axis=1)
+            scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
 
     return selected_action
 
@@ -248,6 +290,7 @@ def step_player(player, player_done, fake_action):
     # Observe new state
     last_screen = player.screen_tensor
     current_screen = get_screen(env, player)
+    player.screen_tensor = current_screen
 
     if not done:
         next_state = current_screen - last_screen
@@ -279,6 +322,7 @@ def train():
 
     player1 = create_player()
     player2 = create_player(load_weights=False)
+    player2.model_keras = None
     players = [player1, player2]
 
     fake_action = np.zeros(3)
@@ -324,15 +368,10 @@ def train():
                     print(f"Episode {i_episode} with {t} length took {time.time()-start}s "
                           f"and scored {player.total_reward}")
 
-                    # # Only track rewards for user
-                    # if player == player1:
-                    #     episode_rewards.append(player.total_reward)
-
                     player_done[player_i] = True
 
-
-            if i_episode % display_interval == 0: # or i_episode < 100:
-                display_screens(players)
+            # if i_episode % display_interval == 0: # or i_episode < 100:
+            #     display_screens(players)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:

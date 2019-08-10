@@ -6,7 +6,9 @@ import innvestigate
 from pytorch2keras.converter import pytorch_to_keras
 from tqdm import trange
 from car import create_env, get_screen as get_train_screen
-from model import DqnNoFc
+from model import DqnNoFc, DQN
+
+import scipy.misc
 
 keras.backend.set_image_data_format('channels_first')
 
@@ -17,21 +19,31 @@ def main():
 
     env = create_env()
     env.reset()
+    last_screen = get_screen(env)
+
     # take 300 random actions first (arbitrary)
     for _ in trange(300):
         random_action = env.action_space.sample()
         env.step(random_action)
+        screen = get_screen(env)
+        last_screen = screen - last_screen
 
-    screen = get_screen(env)  # shape [n, c, h, w]
-    output = innvestigate_input(model, screen)  # shape [n, h, w, c]
+    output = innvestigate_input(model, last_screen)  # shape [n, h, w, c]
     env.close()
 
-    plt.figure(1)
-    plt.subplot(1, 2, 1)
-    plt.imshow(screen[0].transpose([1, 2, 0]))
-    plt.subplot(1, 2, 2)
-    plt.imshow(output[0], cmap='seismic', clim=(-1, 1))
-    plt.show(block=True)
+    output_norm = output[0]
+    # output_norm /= np.max(output_norm)
+    # print(np.min(output_norm), np.max(output_norm))
+
+    scipy.misc.imsave("screen.png", (screen-last_screen)[0].transpose([1, 2, 0]))
+    scipy.misc.imsave("screen_output.png", output_norm)
+
+    # plt.figure(1)
+    # plt.subplot(1, 2, 1)
+    # plt.imshow(screen[0].transpose([1, 2, 0]))
+    # plt.subplot(1, 2, 2)
+    # plt.imshow(output[0], cmap='seismic', clim=(-1, 1))
+    # plt.show(block=True)
 
 
 def innvestigate_input(model, input: np.ndarray):
@@ -66,11 +78,11 @@ def create_model(model_path: str=None):
 
 
 def get_torch_model(screen_height, screen_width, model_path):
-    model = DqnNoFc(screen_height, screen_width)
+    model = DQN(screen_height, screen_width, 5)
 
     if model_path is not None:
-        state_dict = torch.load(model_path)
-        state_dict = {k: v for k, v in state_dict.items() if 'head' not in k}
+        state_dict = torch.load(model_path, map_location='cpu')
+        # state_dict = {k: v for k, v in state_dict.items() if 'head' not in k}
         model.load_state_dict(state_dict)
 
     model.eval()

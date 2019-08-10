@@ -86,6 +86,22 @@ class DqnNoFc(nn.Module):
         return x
 
 
+import numpy as np
+from pytorch2keras.converter import pytorch_to_keras
+
+def torch_to_keras(model, image_shape):
+    """
+    :param model: instance of PyTorch model
+    :param image_shape: list of [c, h, w]
+    """
+    # use dummy variable to trace the model (see github README)
+    input_np = np.random.uniform(0, 1, [1, *image_shape])  # add batch dimension
+    input_var = torch.autograd.Variable(torch.FloatTensor(input_np))
+
+    input_shapes = [image_shape]
+    return pytorch_to_keras(model, input_var, input_shapes, verbose=False)
+
+
 class Player(object):
     def __init__(self, env, policy_net, target_net, optimizer, scheduler, memory, fake_memory, state=None):
         self.env = env
@@ -101,4 +117,6 @@ class Player(object):
         self.total_reward = 0
         self.screen = None
         self.screen_tensor = None
+
+        self.model_keras = torch_to_keras(policy_net, image_shape=[3, 40, 60])
 
