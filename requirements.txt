@@ -6,3 +6,5 @@ torch
 torchvision
 tqdm
 gym[box2d]
+pytorch2keras
+innvestigate
