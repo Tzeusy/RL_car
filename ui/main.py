@@ -1,14 +1,13 @@
 import sys
+from collections import namedtuple
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout
-from widgets import (GroupWidget,
+from .widgets import (GroupWidget,
                      LrSlider,
                      ArchiSlider,
                      EpsSlider,
                      MemorySlider,
                      ImitationSlider,
                      StartButton)
-
-# eps, lr, neural network width/depth, replay_mem [for ddqn], imitation reward (?)
 
 
 class Main(QWidget):
@@ -24,6 +23,7 @@ class Main(QWidget):
             'memory': MemorySlider(),
             'imitation': ImitationSlider(),
         }
+        self.hyperparameters = self.get_hyperparameters()
 
         self.button = StartButton()
         self.button.button.clicked.connect(self.onclick)
@@ -45,22 +45,25 @@ class Main(QWidget):
         widget.setLayout(layout)
         return widget
 
-    def onclick(self):
+    def get_hyperparameters(self):
         lr = self.nn_widgets['lr'].get_value()
-        print('LR:', lr)
-
         ksize, n_layers = self.nn_widgets['archi'].get_value()
-        print('Kernel size:', ksize)
-        print('No. of conv layers:', n_layers)
-
         eps = self.rl_widgets['eps'].get_value()
-        print('Eps:', eps)
-
-        memory = self.rl_widgets['memory'].get_value()
-        print('Memory size:', memory)
-
+        memory_size = self.rl_widgets['memory'].get_value()
         imitation_reward = self.rl_widgets['imitation'].get_value()
-        print('Imitation reward:', imitation_reward)
+
+        Hyperparameters = namedtuple('Hyperparameters', 'lr '
+                                                        'ksize '
+                                                        'n_layers '
+                                                        'eps '
+                                                        'memory_size '
+                                                        'imitation_reward')
+        return Hyperparameters(lr=lr, ksize=ksize, n_layers=n_layers, eps=eps,
+                               memory_size=memory_size, imitation_reward=imitation_reward)
+
+    def onclick(self):
+        self.hyperparameters = self.get_hyperparameters()
+        self.close()
 
 
 def main():
