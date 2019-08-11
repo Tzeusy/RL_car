@@ -6,3 +6,4 @@ torch
 torchvision
 tqdm
 gym[box2d]
+pyqt5
