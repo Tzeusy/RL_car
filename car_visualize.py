@@ -180,7 +180,7 @@ def select_action(player, state):
             save_interval = 1
 
             if num_photos % save_interval == 0:
-                # player_state = player.state.cpu().numpy()
+                player_state = player.state.cpu().numpy()
                 output = innvestigate_input(player.model_keras, player_state)  # shape [n, h, w, c]
 
                 # Normalize
