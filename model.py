@@ -8,6 +8,7 @@ import random
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
+
 class ReplayMemory(object):
     def __init__(self, capacity):
         self.capacity = capacity
@@ -28,6 +29,7 @@ class ReplayMemory(object):
 
     def __len__(self):
         return len(self.memory)
+
 
 class DQN(nn.Module):
 
@@ -79,4 +81,42 @@ class Player(object):
         self.consecutive_noreward = 0
         self.total_reward = 0
         self.screen = None
+
+
+class Baseline(nn.Module):
+    def __init__(self, h, w):
+        super(Baseline, self).__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2)
+        self.bn1 = nn.BatchNorm2d(16)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=2)
+        self.bn3 = nn.BatchNorm2d(64)
+        self.conv4 = nn.Conv2d(64, 128, kernel_size=3, stride=2)
+        self.bn4 = nn.BatchNorm2d(128)
+
+        # Compute output size of convolutions
+        def conv2d_size_out(size, kernel_size=3, stride=2):
+            return (size - (kernel_size - 1) - 1) // stride + 1
+        convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(conv2d_size_out(w))))
+        convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(conv2d_size_out(h))))
+        linear_input_size = convw * convh * 128
+
+        self.head1 = nn.Linear(linear_input_size, 16)
+        self.b = nn.Linear(16, 1)
+        self.output_fc = nn.Linear(16, 5)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = torch.sigmoid((self.bn4(self.conv4(x))))
+
+        x = self.head1(x.view(x.size(0), -1))
+
+        out_a = self.softmax(self.output_fc(x)).clamp(0.001, 1.0)
+        out_v = self.b(x)
+
+        return out_a, out_v
 
