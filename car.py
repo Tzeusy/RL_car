@@ -125,7 +125,7 @@ def create_player(load_weights=True):
 
     policy_net = DQN(screen_height, screen_width, n_actions).to(device)
     model_dir = "semi_successful_models"
-    model_file_name = "manual30_ep40.pth"
+    model_file_name = "manual30_ep30.pth"
     policy_net.eval()
     target_net = DQN(screen_height, screen_width, n_actions).to(device)
     target_net.eval()
