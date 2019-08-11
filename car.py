@@ -330,7 +330,6 @@ def train():
 
                     player_done[player_i] = True
 
-
             if i_episode % display_interval == 0: # or i_episode < 100:
                 display_screens(players)
 
