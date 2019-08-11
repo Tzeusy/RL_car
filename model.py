@@ -121,6 +121,8 @@ class Player(object):
         self.screen = None
         self.screen_tensor = None
 
+        self.lrp_output = None
+
         self.model_keras = torch_to_keras(policy_net, image_shape=[3, 40, 60])
         name = {
             0: 'lrp.sequential_preset_a_flat',

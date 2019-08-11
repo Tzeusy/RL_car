@@ -22,6 +22,8 @@ from plots import plot_rewards
 import keras
 import innvestigate
 import scipy.misc
+from pyg import ImageWindow
+import pyglet
 
 def innvestigate_input(analyzer, input: np.ndarray):
     """
@@ -65,12 +67,10 @@ n_actions = 5  # env.action_space.shape[0]
 
 steps_done = 0
 num_photos = 0
-episode_rewards = []
 
 resize = T.Compose([T.ToPILImage(),
                     T.Resize(40, interpolation=Image.CUBIC),
                     T.ToTensor()])
-
 
 def create_env():
     env = gym.make('CarRacing-v0').unwrapped
@@ -105,25 +105,36 @@ def get_screen(env, player=None):
     return screen
 
 
-def display_screens(players):
+def display_screens(image_window, players):
     start = time.time()
 
     full_screen = None
 
     for player in players:
         screen = player.screen #.env.render(mode='rgb_array') #.transpose((1, 0, 2))
+        channels, height, width = screen.shape
+        border = np.zeros((3, height, 10), dtype=np.uint8) # black border for divider
 
         if full_screen is None:
             full_screen = screen
         else:
-            border_width = 10
-            height = full_screen.shape[1]
-            border = np.zeros((3, height, border_width), dtype=np.uint8)
-
             full_screen = np.concatenate((full_screen, border, screen), axis=2)
+
+        if player.lrp_output is not None:
+            # TODO: Can repeat channels after performing resize for better performance
+            lrp_output = cv2.resize(player.lrp_output, dsize=(width, height), interpolation=cv2.INTER_CUBIC) # maybe INTER_NEAREST instead?
+            lrp_output = lrp_output.transpose((2, 0, 1))
+            lrp_output /= lrp_output.max()
+            lrp_output[lrp_output < 0] = 0
+
+            lrp_output = (lrp_output * 255).astype(np.uint8)
+
+            full_screen = np.concatenate((full_screen, border, lrp_output), axis=2)
 
     # TODO: Rewrite this to display in whatever UI library is being used
     full_screen = full_screen.transpose((1, 2, 0))
+
+    # image_window.update()
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
     cv2.imshow('image', full_screen)
 
@@ -160,42 +171,103 @@ def create_player(load_weights=True):
     return player
 
 def select_action(player, state):
-    # No EPS for visualizing
-    with torch.no_grad():
-        # t.max(1) will return largest column value of each row.
-        # second column on max result is index of where max element was
-        # found, so we pick action with the larger expected reward.
-        selected_action = player.policy_net(player.state).max(1)[1].item()
+    sample = random.random()
+    eps_threshold = EPS_END + (EPS_START - EPS_END) * \
+                    np.exp(-1. * steps_done / EPS_DECAY)
 
-        if player.model_keras:
-            start = time.time()
-            global num_photos
-            num_photos += 1
-            save_interval = 1
+    # selected_action = random.randint(0, n_actions - 1)
+    # Nothing, Forward, Brake, Left, Right
+    selected_action = random.choices(range(5), [0.05, 0.45, 0.002, 0.24, 0.24])[0]
 
-            if num_photos % save_interval == 0:
-                player_state = player.state.cpu().numpy()
-                output = innvestigate_input(player.analyzer, player_state)  # shape [n, h, w, c]
+    if sample > eps_threshold:
+        with torch.no_grad():
+            # t.max(1) will return largest column value of each row.
+            # second column on max result is index of where max element was
+            # found, so we pick action with the larger expected reward.
+            selected_action = player.policy_net(player.state).max(1)[1].item()
 
-                # Normalize
-                lrp_output = np.repeat(output[0][:,:,np.newaxis], repeats=3, axis=2)
-                lrp_output -= np.min(lrp_output)
-                lrp_output /= np.max(lrp_output)
-                screen_output = player.screen_tensor[0,:].cpu().numpy().transpose(1, 2, 0)
-                screen_output -= np.min(screen_output)
-                screen_output /= np.max(screen_output)
+    if player.model_keras:
+        start = time.time()
+        global num_photos
+        num_photos += 1
+        save_interval = 1
 
-                display = np.concatenate((lrp_output, screen_output), axis=1)
-                display = Image.fromarray((display * 255).astype(np.uint8))
-                display.save(f"output_{num_photos // save_interval}.png")
-                # scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
-            print("Took {:.3f}s for lrp".format(time.time() - start))
+        if num_photos % save_interval == 0:
+            player_state = player.state.cpu().numpy()
+            output = innvestigate_input(player.analyzer, player_state)  # shape [n, h, w, c]
+
+            # Normalize
+            lrp_output = np.repeat(output[0][:,:,np.newaxis], repeats=3, axis=2)
+            player.lrp_output = lrp_output
+
+            # lrp_output -= np.min(lrp_output)
+            # lrp_output /= np.max(lrp_output)
+            # screen_output = player.screen_tensor[0,:].cpu().numpy().transpose(1, 2, 0)
+            # screen_output -= np.min(screen_output)
+            # screen_output /= np.max(screen_output)
+
+            # display = np.concatenate((lrp_output, screen_output), axis=1)
+            # display = Image.fromarray((display * 255).astype(np.uint8))
+            # display.save(f"output_{num_photos // save_interval}.png")
+            # scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
+
+        # print("Took {:.3f}s for lrp".format(time.time() - start))
 
     return selected_action
 
-def step_player(player, player_done, fake_action):
-    start = time.time()
+def optimize_model(player):
+    if len(player.memory) < BATCH_SIZE or len(player.fake_memory) < BATCH_SIZE:
+        return
+    if len(player.fake_memory) >= BATCH_SIZE:
+        transitions = player.memory.sample(BATCH_SIZE // 2) + player.fake_memory.sample(BATCH_SIZE // 2)
+    else:
+        transitions = player.memory.sample(BATCH_SIZE)
+    # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
+    # detailed explanation). This converts batch-array of Transitions
+    # to Transition of batch-arrays.
+    batch = Transition(*zip(*transitions))
 
+    # Compute a mask of non-final states and concatenate the batch elements
+    # (a final state would've been the one after which simulation ended)
+    non_final_mask = torch.tensor([s is not None for s in batch.next_state],
+                                  dtype=torch.uint8, device=device)
+    non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
+    state_batch = torch.cat(batch.state)
+    action_batch = torch.cat(batch.action)
+    reward_batch = torch.cat(batch.reward)
+
+    # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+    # columns of actions taken. These are the actions which would've been taken
+    # for each batch state according to policy_net
+    state_action_values = player.policy_net(state_batch).gather(1, action_batch)
+
+    # Compute V(s_{t+1}) for all next states.
+    # Expected values of actions for non_final_next_states are computed based
+    # on the "older" target_net; selecting their best reward with max(1)[0].
+    # This is merged based on the mask, such that we'll have either the expected
+    # state value or 0 in case the state was final.
+
+    next_state_values = torch.zeros(BATCH_SIZE, device=device)
+    max_idx = player.policy_net(non_final_next_states).max(1)[1]
+
+    # DDQN
+    next_state_values[non_final_mask] = torch.gather(player.target_net(non_final_next_states), dim=1, index=max_idx[:, None]).squeeze()
+    # Compute the expected Q values
+    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+    # Compute Huber loss
+    loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+
+    # Optimize the model
+    player.optimizer.zero_grad()
+    loss.backward()
+    for param in player.policy_net.parameters():
+        param.grad.data.clamp_(-1, 1)
+    player.optimizer.step()
+    player.scheduler.step()
+
+
+def step_player(player, player_done, fake_action):
     env = player.env
     real_action_idx = select_action(player, player.state)
     real_action = index_to_action(real_action_idx)
@@ -248,25 +320,32 @@ def step_player(player, player_done, fake_action):
 
     # Move to the next state
     player.state = next_state
-    print("Step player took {:.3f}s".format(time.time() - start))
+
+    optimize_model(player)
 
     return done
 
 def train():
     os.makedirs(snapshot_dir, exist_ok=True)
-    save_every = 20  # Save every 100 episodes
-    display_interval = 2  # Display every 50 episodes
-    num_episodes = 3000
+    player1 = create_player(load_weights=False)
+    player1.model_keras = None
+    player2 = create_player()
+    players = [player1, player2]
 
-    player1 = create_player()
-    player2 = create_player(load_weights=False)
-    player2.model_keras = None
-    players = [player1]#, player2]
+    image_window = ImageWindow()
 
     fake_action = np.zeros(3)
-    fake_action_listener(player1.env, fake_action)
+    fake_action_listener(image_window, fake_action)
+    
+    # def main_event(value):
+    #     while True:
+    #         window.switch_to()
+    #         image_window.update()
+    #         image_window.on_draw()
+    save_every = 20  # Save every 100 episodes
+    display_interval = 2  # Display every 2 steps
+    num_episodes = 3000
 
-    episode_rewards = []
     for i_episode in range(num_episodes):
         global steps_done
         steps_done += 1
@@ -308,28 +387,37 @@ def train():
 
                     player_done[player_i] = True
 
-            # if i_episode % display_interval == 0: # or i_episode < 100:
-            #     display_screens(players)
+            if i_episode % display_interval == 0: # or i_episode < 100:
+                # image_window.update()
+                display_screens(image_window, players)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
             for player in players:
                 player.target_net.load_state_dict(player.policy_net.state_dict())
 
-        current_reward = np.mean(episode_rewards[-100:-1])
-
         # Save for user
         if i_episode % save_every == 0 and i_episode > 0:
-            filename = f'{snapshot_dir}/target_episode{i_episode}_reward_{current_reward:.3f}.pth'
+            filename = f'{snapshot_dir}/target_episode{i_episode}.pth'
             torch.save(player1.target_net.state_dict(), filename)
 
+    # def render(value):
+    #     print("Rendering")
+    #     image_window.update()
+    #     display_screens(image_window, players)
+    # pyglet.clock.schedule_interval(render, 0.1)
+    # pyglet.clock.schedule_once(main_event, 0.1)
+    # pyglet.app.run()
+    
     print('Complete')
+
     for player in players:
         player.env.close()
 
 
-def fake_action_listener(env, fake_action):
+def fake_action_listener(window, fake_action):
     def key_press(k, mod):
+        print(k)
         if k == key.LEFT:
             fake_action[0] = -1.0
         elif k == key.RIGHT:
@@ -349,8 +437,10 @@ def fake_action_listener(env, fake_action):
         elif k == key.DOWN:
             fake_action[2] = 0.0
 
-    env.viewer.window.on_key_press = key_press
-    env.viewer.window.on_key_release = key_release
+    window.on_key_press = key_press
+    window.on_key_release = key_release
+    # env.viewer.window.on_key_press = key_press
+    # env.viewer.window.on_key_release = key_release
 
 
 def index_to_action(action_index: int) -> np.ndarray:

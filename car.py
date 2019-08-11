@@ -142,7 +142,6 @@ def create_player(load_weights=True):
     player = Player(env, policy_net, target_net, optimizer, scheduler, memory, fake_memory)
     return player
 
-
 def select_action(player, state):
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
