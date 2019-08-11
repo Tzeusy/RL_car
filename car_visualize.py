@@ -166,98 +166,42 @@ def create_player(load_weights=True):
     return player
 
 def select_action(player, state):
-    sample = random.random()
-    eps_threshold = EPS_END + (EPS_START - EPS_END) * \
-                    np.exp(-1. * steps_done / EPS_DECAY)
+    # No EPS for visualizing
+    with torch.no_grad():
+        # t.max(1) will return largest column value of each row.
+        # second column on max result is index of where max element was
+        # found, so we pick action with the larger expected reward.
+        selected_action = player.policy_net(player.state).max(1)[1].item()
 
-    # selected_action = random.randint(0, n_actions - 1)
-    # Nothing, Forward, Brake, Left, Right
-    selected_action = random.choices(range(5), [0.05, 0.45, 0.002, 0.24, 0.24])[0]
+        if player.model_keras:
+            start = time.time()
+            global num_photos
+            num_photos += 1
+            save_interval = 1
 
-    if sample > eps_threshold:
-        with torch.no_grad():
-            # t.max(1) will return largest column value of each row.
-            # second column on max result is index of where max element was
-            # found, so we pick action with the larger expected reward.
-            selected_action = player.policy_net(player.state).max(1)[1].item()
+            if num_photos % save_interval == 0:
+                # player_state = player.state.cpu().numpy()
+                output = innvestigate_input(player.model_keras, player_state)  # shape [n, h, w, c]
 
-    if player.model_keras:
-        global num_photos
-        num_photos += 1
-        save_interval = 1
+                # Normalize
+                lrp_output = np.repeat(output[0][:,:,np.newaxis], repeats=3, axis=2)
+                lrp_output -= np.min(lrp_output)
+                lrp_output /= np.max(lrp_output)
+                screen_output = player.screen_tensor[0,:].cpu().numpy().transpose(1, 2, 0)
+                screen_output -= np.min(screen_output)
+                screen_output /= np.max(screen_output)
 
-        if num_photos % save_interval == 0:
-            player_state = player.state.cpu().numpy()
-            output = innvestigate_input(player.model_keras, player_state)  # shape [n, h, w, c]
-
-            # Normalize
-            lrp_output = np.repeat(output[0][:,:,np.newaxis], repeats=3, axis=2)
-            lrp_output -= np.min(lrp_output)
-            lrp_output /= np.max(lrp_output)
-            screen_output = player.screen_tensor[0,:].cpu().numpy().transpose(1, 2, 0)
-            screen_output -= np.min(screen_output)
-            screen_output /= np.max(screen_output)
-
-            display = np.concatenate((lrp_output, screen_output), axis=1)
-            display = Image.fromarray((display * 255).astype(np.uint8))
-            display.save(f"output_{num_photos // save_interval}.png")
-            # scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
+                display = np.concatenate((lrp_output, screen_output), axis=1)
+                display = Image.fromarray((display * 255).astype(np.uint8))
+                display.save(f"output_{num_photos // save_interval}.png")
+                # scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
+            print("Took {:.3f}s for lrp".format(time.time() - start))
 
     return selected_action
 
-
-def optimize_model(player):
-    if len(player.memory) < BATCH_SIZE or len(player.fake_memory) < BATCH_SIZE:
-        return
-    if len(player.fake_memory) >= BATCH_SIZE:
-        transitions = player.memory.sample(BATCH_SIZE // 2) + player.fake_memory.sample(BATCH_SIZE // 2)
-    else:
-        transitions = player.memory.sample(BATCH_SIZE)
-    # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
-    # detailed explanation). This converts batch-array of Transitions
-    # to Transition of batch-arrays.
-    batch = Transition(*zip(*transitions))
-
-    # Compute a mask of non-final states and concatenate the batch elements
-    # (a final state would've been the one after which simulation ended)
-    non_final_mask = torch.tensor([s is not None for s in batch.next_state],
-                                  dtype=torch.uint8, device=device)
-    non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
-    state_batch = torch.cat(batch.state)
-    action_batch = torch.cat(batch.action)
-    reward_batch = torch.cat(batch.reward)
-
-    # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
-    # columns of actions taken. These are the actions which would've been taken
-    # for each batch state according to policy_net
-    state_action_values = player.policy_net(state_batch).gather(1, action_batch)
-
-    # Compute V(s_{t+1}) for all next states.
-    # Expected values of actions for non_final_next_states are computed based
-    # on the "older" target_net; selecting their best reward with max(1)[0].
-    # This is merged based on the mask, such that we'll have either the expected
-    # state value or 0 in case the state was final.
-
-    next_state_values = torch.zeros(BATCH_SIZE, device=device)
-    max_idx = player.policy_net(non_final_next_states).max(1)[1]
-
-    # DDQN
-    next_state_values[non_final_mask] = torch.gather(player.target_net(non_final_next_states), dim=1, index=max_idx[:, None]).squeeze()
-    # Compute the expected Q values
-    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
-
-    # Compute Huber loss
-    loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
-
-    # Optimize the model
-    player.optimizer.zero_grad()
-    loss.backward()
-    for param in player.policy_net.parameters():
-        param.grad.data.clamp_(-1, 1)
-    player.optimizer.step()
-    player.scheduler.step()
-
 def step_player(player, player_done, fake_action):
+    start = time.time()
+
     env = player.env
     real_action_idx = select_action(player, player.state)
     real_action = index_to_action(real_action_idx)
@@ -310,9 +254,7 @@ def step_player(player, player_done, fake_action):
 
     # Move to the next state
     player.state = next_state
-
-    # Perform one step of the optimization (on the target network)
-    optimize_model(player)
+    print("Step player took {:.3f}s".format(time.time() - start))
 
     return done
 
@@ -372,8 +314,8 @@ def train():
 
                     player_done[player_i] = True
 
-            if i_episode % display_interval == 0: # or i_episode < 100:
-                display_screens(players)
+            # if i_episode % display_interval == 0: # or i_episode < 100:
+            #     display_screens(players)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
