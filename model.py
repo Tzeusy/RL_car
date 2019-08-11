@@ -89,6 +89,7 @@ class DqnNoFc(nn.Module):
 
 
 import numpy as np
+import innvestigate
 from pytorch2keras.converter import pytorch_to_keras
 
 def torch_to_keras(model, image_shape):
@@ -121,4 +122,11 @@ class Player(object):
         self.screen_tensor = None
 
         self.model_keras = torch_to_keras(policy_net, image_shape=[3, 40, 60])
+        name = {
+            0: 'lrp.sequential_preset_a_flat',
+            1: 'guided_backprop',
+            2: 'gradient',
+        }[0]
+        self.analyzer = innvestigate.create_analyzer(name, self.model_keras)
+
 

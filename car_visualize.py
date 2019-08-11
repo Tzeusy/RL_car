@@ -23,17 +23,11 @@ import keras
 import innvestigate
 import scipy.misc
 
-def innvestigate_input(model, input: np.ndarray):
+def innvestigate_input(analyzer, input: np.ndarray):
     """
     :param model: Keras model
     :param input: 4-D numpy array of shape [n, h, w, c]
     """
-    name = {
-        0: 'lrp.sequential_preset_a_flat',
-        1: 'guided_backprop',
-        2: 'gradient',
-    }[0]
-    analyzer = innvestigate.create_analyzer(name, model)
     a = analyzer.analyze(input)
 
     # aggregate along color channels and normalize to [-1, 1]
@@ -181,7 +175,7 @@ def select_action(player, state):
 
             if num_photos % save_interval == 0:
                 player_state = player.state.cpu().numpy()
-                output = innvestigate_input(player.model_keras, player_state)  # shape [n, h, w, c]
+                output = innvestigate_input(player.analyzer, player_state)  # shape [n, h, w, c]
 
                 # Normalize
                 lrp_output = np.repeat(output[0][:,:,np.newaxis], repeats=3, axis=2)
