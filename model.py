@@ -7,6 +7,8 @@ import random
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class ReplayMemory(object):
     def __init__(self, capacity):
@@ -96,7 +98,7 @@ def torch_to_keras(model, image_shape):
     """
     # use dummy variable to trace the model (see github README)
     input_np = np.random.uniform(0, 1, [1, *image_shape])  # add batch dimension
-    input_var = torch.autograd.Variable(torch.FloatTensor(input_np))
+    input_var = torch.autograd.Variable(torch.tensor(input_np, dtype=torch.float, device=device))
 
     input_shapes = [image_shape]
     return pytorch_to_keras(model, input_var, input_shapes, verbose=False)
