@@ -268,7 +268,7 @@ def step_player(player, player_done, fake_action):
     player.state = next_state
 
     # Perform one step of the optimization (on the target network)
-    optimize_model(player)
+    # optimize_model(player)
 
     return done
 
@@ -276,11 +276,11 @@ def train():
     os.makedirs(snapshot_dir, exist_ok=True)
     save_every = 20  # Save every 100 episodes
     display_interval = 2  # Display every 50 episodes
-    num_episodes = 3000
+    num_episodes = 300
 
     player1 = create_player()
-    player2 = create_player(load_weights=False)
-    players = [player1, player2]
+    # player2 = create_player(load_weights=False)
+    players = [player1]#, player2]
 
     fake_action = np.zeros(3)
     fake_action_listener(player1.env, fake_action)
@@ -325,14 +325,15 @@ def train():
                     print(f"Episode {i_episode} with {t} length took {time.time()-start}s "
                           f"and scored {player.total_reward}")
 
-                    # # Only track rewards for user
-                    # if player == player1:
-                    #     episode_rewards.append(player.total_reward)
+                    # Only track rewards for user
+                    if player == player1:
+                        episode_rewards.append(player.total_reward)
 
                     player_done[player_i] = True
 
-            if i_episode % display_interval == 0: # or i_episode < 100:
-                display_screens(players)
+            # if t % display_interval == 0: # or i_episode < 100:
+            #     display_screens(players)
+            plot_rewards(episode_rewards, "epoch30")
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
