@@ -174,3 +174,4 @@ class DQNUser(nn.Module):
         x = self.head_1(x.view(x.size(0), -1))
         x = self.head_2(x)
         return x
+
