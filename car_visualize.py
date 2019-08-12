@@ -113,30 +113,30 @@ def display_screens(players):
         channels, height, width = screen.shape
         border = np.zeros((3, height, 10), dtype=np.uint8) # black border for divider
 
+        lrp_output = cv2.resize(player.lrp_output, dsize=(width, height), interpolation=cv2.INTER_CUBIC) # maybe INTER_NEAREST instead?
+        # Repeat to make RGB channels
+        lrp_output = np.repeat(lrp_output[:,:,np.newaxis], repeats=3, axis=2)
+        lrp_output = lrp_output.transpose((2, 0, 1))
+
+        # Normalize
+        lrp_output /= lrp_output.max()
+        lrp_output[lrp_output < 0] = 0
+
+        lrp_output = (lrp_output * 255).astype(np.uint8)
+
+        screen = np.concatenate((screen, border, lrp_output), axis=2)
+
         if full_screen is None:
             full_screen = screen
         else:
-            full_screen = np.concatenate((full_screen, border, screen), axis=2)
+            full_screen = np.concatenate((full_screen, screen), axis=1)
 
-        if player.lrp_output is not None:
-            # TODO: Can repeat channels after performing resize for better performance
-            lrp_output = cv2.resize(player.lrp_output, dsize=(width, height), interpolation=cv2.INTER_CUBIC) # maybe INTER_NEAREST instead?
-            lrp_output = lrp_output.transpose((2, 0, 1))
-            lrp_output /= lrp_output.max()
-            lrp_output[lrp_output < 0] = 0
-
-            lrp_output = (lrp_output * 255).astype(np.uint8)
-
-            full_screen = np.concatenate((full_screen, border, lrp_output), axis=2)
-
-    # TODO: Rewrite this to display in whatever UI library is being used
     full_screen = full_screen.transpose((1, 2, 0))
 
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
     cv2.imshow('image', full_screen)
 
     print("Time taken to render: {:.3f}s".format(time.time() - start))
-
 
 def create_player(load_weights=True):
     env = create_env()
@@ -193,20 +193,7 @@ def select_action(player, state):
             player_state = player.state.cpu().numpy()
             output = innvestigate_input(player.analyzer, player_state)  # shape [n, h, w, c]
 
-            # Normalize
-            lrp_output = np.repeat(output[0][:,:,np.newaxis], repeats=3, axis=2)
-            player.lrp_output = lrp_output
-
-            # lrp_output -= np.min(lrp_output)
-            # lrp_output /= np.max(lrp_output)
-            # screen_output = player.screen_tensor[0,:].cpu().numpy().transpose(1, 2, 0)
-            # screen_output -= np.min(screen_output)
-            # screen_output /= np.max(screen_output)
-
-            # display = np.concatenate((lrp_output, screen_output), axis=1)
-            # display = Image.fromarray((display * 255).astype(np.uint8))
-            # display.save(f"output_{num_photos // save_interval}.png")
-            # scipy.misc.imsave(f"output_{num_photos // save_interval}.png", display)
+            player.lrp_output = output[0]
 
         # print("Took {:.3f}s for lrp".format(time.time() - start))
 
@@ -325,14 +312,13 @@ def step_player(player, player_done, fake_action):
 def train():
     os.makedirs(snapshot_dir, exist_ok=True)
     player1 = create_player(load_weights=False)
-    player1.model_keras = None
-    player2 = create_player()
+    player2 = create_player(load_weights=False)
     players = [player1, player2]
 
     fake_action = np.zeros(3)
     fake_action_listener(player1.env, fake_action)
 
-    save_every = 20  # Save every 100 episodes
+    save_every = 100  # Save every 100 episodes
     display_interval = 2  # Display every 2 steps
     num_episodes = 3000
 
