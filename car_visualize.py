@@ -16,7 +16,7 @@ import random
 from itertools import count
 from enum import Enum
 
-from model import DQN, ReplayMemory, Transition, Player
+from model import DQN, DQNUser, ReplayMemory, Transition, Player
 from plots import plot_rewards
 
 import keras
@@ -59,6 +59,8 @@ MAX_EPISODE_LENGTH = 2000
 LEARNING_RATE = 5e-3
 REPLAY_MEM = 90000
 IMITATION_REWARD = 5
+KERNEL_SIZE = 3
+N_LAYERS = 4
 snapshot_dir = "snapshots"
 
 # Get number of actions from gym action space
@@ -154,7 +156,7 @@ def display_screens(players, i_episode):
 
     print("Time taken to render: {:.3f}s".format(time.time() - start))
 
-def create_player(load_weights=True):
+def create_player(load_weights=True, user_model=False):
     env = create_env()
     env.reset()
 
@@ -164,14 +166,22 @@ def create_player(load_weights=True):
     init_screen = get_screen(env)
     _, n_channels, screen_height, screen_width = init_screen.shape # 3, 40, 60
 
-    policy_net = DQN(screen_height, screen_width, n_actions).to(device)
-    model_dir = "semi_successful_models"
-    model_file_name = "manual30_ep30.pth"
-    policy_net.eval()
-    target_net = DQN(screen_height, screen_width, n_actions).to(device)
-    target_net.eval()
+    if user_model:
+        policy_net = DQNUser(screen_height, screen_width, n_actions,
+                             KERNEL_SIZE, N_LAYERS).to(device)
+        policy_net.eval()
+        target_net = DQNUser(screen_height, screen_width, n_actions,
+                             KERNEL_SIZE, N_LAYERS).to(device)
+        target_net.eval()
+    else:
+        policy_net = DQN(screen_height, screen_width, n_actions).to(device)
+        policy_net.eval()
+        target_net = DQN(screen_height, screen_width, n_actions).to(device)
+        target_net.eval()
 
     if load_weights:
+        model_dir = "semi_successful_models"
+        model_file_name = "manual30_ep30.pth"
         policy_net.load_state_dict(torch.load(f"{model_dir}/{model_file_name}", map_location='cpu'))
         target_net.load_state_dict(policy_net.state_dict())
 
@@ -325,7 +335,7 @@ def step_player(player, player_done, fake_action):
 
 def train():
     os.makedirs(snapshot_dir, exist_ok=True)
-    player1 = create_player(load_weights=False)
+    player1 = create_player(load_weights=False, user_model=True)
     player2 = create_player(load_weights=False)
     players = [player1, player2]
 

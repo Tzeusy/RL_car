@@ -18,6 +18,8 @@ def app():
     car.LEARNING_RATE = params.lr
     car.REPLAY_MEM = params.memory_size
     car.IMITATION_REWARD = params.imitation_reward
+    car.KERNEL_SIZE = params.ksize
+    car.N_LAYERS = params.n_layers
 
     print('VROOM VROOM')
     car.train()
