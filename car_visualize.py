@@ -22,7 +22,6 @@ from plots import plot_rewards
 import keras
 import innvestigate
 import scipy.misc
-import pyglet
 
 def innvestigate_input(analyzer, input: np.ndarray):
     """
@@ -71,6 +70,8 @@ resize = T.Compose([T.ToPILImage(),
                     T.Resize(40, interpolation=Image.CUBIC),
                     T.ToTensor()])
 
+robot_image = np.array(Image.open("robot.png"))
+
 def create_env():
     env = gym.make('CarRacing-v0').unwrapped
     env.mode = 'fast'
@@ -108,7 +109,7 @@ def display_screens(players):
 
     full_screen = None
 
-    for player in players:
+    for i, player in enumerate(players):
         screen = player.screen #.env.render(mode='rgb_array') #.transpose((1, 0, 2))
         channels, height, width = screen.shape
         border = np.zeros((3, height, 10), dtype=np.uint8) # black border for divider
@@ -125,6 +126,11 @@ def display_screens(players):
         lrp_output = (lrp_output * 255).astype(np.uint8)
 
         screen = np.concatenate((screen, border, lrp_output), axis=2)
+
+        # Add robot
+        if i == 1:
+            robot_h, robot_w, c = robot_image.shape
+            screen[:, :robot_h, :robot_w,] = robot_image[:,:,:3].transpose((2, 0, 1)) # Omit A channel
 
         if full_screen is None:
             full_screen = screen
