@@ -145,7 +145,10 @@ def display_screens(players, i_episode):
     font = cv2.FONT_HERSHEY_SIMPLEX
     cv2.putText(full_screen, f'Episode {i_episode+1}', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
 
-    cv2.imshow('image', full_screen)
+    name = 'VROOM VROOM'
+    cv2.namedWindow(name)
+    cv2.moveWindow(name, 100, 100)
+    cv2.imshow(name, full_screen)
     cv2.waitKey(1)
 
     print("Time taken to render: {:.3f}s".format(time.time() - start))
@@ -273,10 +276,10 @@ def step_player(player, player_done, fake_action):
     if fake_action_available:
         print("Inputting fake action for imitation")
 
-    if not fake_action_available:
-        _, reward, done, _ = env.step(real_action)
-    else:
-        _, reward, done, _ = env.step(fake_action)
+    # if not fake_action_available:
+    _, reward, done, _ = env.step(real_action)
+    # else:
+        # _, reward, done, _ = env.step(fake_action)
 
     if(reward<0):
         player.consecutive_noreward += 1
@@ -330,7 +333,7 @@ def train():
     fake_action_listener(player1.env, fake_action)
 
     save_every = 100  # Save every 100 episodes
-    display_interval = 2  # Display every 2 steps
+    display_interval = 1  # Display every 2 steps
     num_episodes = 3000
 
     for i_episode in range(num_episodes):
@@ -374,7 +377,7 @@ def train():
 
                     player_done[player_i] = True
 
-            if i_episode % display_interval == 0: # or i_episode < 100:
+            if t % display_interval == 0:  # or i_episode < 100:
                 display_screens(players, i_episode)
 
         # Update the target network, copying all weights and biases in DQN
