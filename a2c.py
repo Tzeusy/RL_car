@@ -128,7 +128,7 @@ def generate_episode(env, model, device, steps_done, episode_rewards):
         if done or t == MAX_T:
             print(total_reward)
             episode_rewards.append(total_reward)
-            plot_rewards(episode_rewards)
+            plot_rewards(episode_rewards, 'a2c_rewards', './')
             break
 
     return i_rewards, i_states, i_actions, steps_done

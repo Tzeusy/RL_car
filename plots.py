@@ -1,19 +1,30 @@
+import numpy as np
 import matplotlib.pyplot as plt
-import torch
+import os
+from os.path import join
 
 
-def plot_rewards(episode_rewards, title):
-    plt.figure(2)
+def plot_rewards(episode_rewards, save_name, save_dir='plots'):
+    assert not save_name.endswith('.jpg'), 'Omit .jpg from save_name'
+    os.makedirs(save_dir, exist_ok=True)
+
+    rewards = np.asarray(episode_rewards)
+    averages = []
+    for i in range(1, len(rewards)):
+        if i < 100:
+            averages.append(rewards[:i].mean())
+        else:
+            averages.append(rewards[i-100:i].mean())
+
+    plt.figure()
     plt.clf()
-    rewards = torch.tensor(episode_rewards, dtype=torch.float)
-    plt.title(title)
-    plt.xlabel('Episode')
-    plt.ylabel('Duration')
-    plt.plot(rewards.numpy())
-    # Take 100 episode averages and plot them too
-    if len(rewards) >= 100:
-        means = rewards.unfold(0, 100, 1).mean(1).view(-1)
-        means = torch.cat((torch.zeros(99), means))
-        plt.plot(means.numpy())
 
-    plt.pause(0.001)  # pause a bit so that plots are updated
+    plt.title('Training...')
+    plt.xlabel('Episode')
+    plt.ylabel('Rewards')
+
+    plt.plot(rewards, label='Rewards')
+    plt.plot(averages, label='Averages')
+
+    plt.savefig(join(save_dir, f'{save_name}.jpg'))
+    plt.close('all')

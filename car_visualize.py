@@ -16,8 +16,24 @@ import random
 from itertools import count
 from enum import Enum
 
-from model import DQN, ReplayMemory, Transition, Player
+from model import DQN, DQNUser, ReplayMemory, Transition, Player
 from plots import plot_rewards
+
+import keras
+import innvestigate
+import scipy.misc
+
+def innvestigate_input(analyzer, input: np.ndarray):
+    """
+    :param model: Keras model
+    :param input: 4-D numpy array of shape [n, h, w, c]
+    """
+    a = analyzer.analyze(input)
+
+    # aggregate along color channels and normalize to [-1, 1]
+    a = a.sum(axis=np.argmax(np.asarray(a.shape) == 3))
+    a /= np.max(np.abs(a))
+    return a
 
 
 class Actions(Enum):
@@ -43,25 +59,28 @@ MAX_EPISODE_LENGTH = 2000
 LEARNING_RATE = 5e-3
 REPLAY_MEM = 90000
 IMITATION_REWARD = 5
+KERNEL_SIZE = 3
+N_LAYERS = 4
 snapshot_dir = "snapshots"
 
 # Get number of actions from gym action space
 n_actions = 5  # env.action_space.shape[0]
 
 steps_done = 0
-episode_rewards = []
+num_photos = 0
+do_optimize = True
 
 resize = T.Compose([T.ToPILImage(),
                     T.Resize(40, interpolation=Image.CUBIC),
                     T.ToTensor()])
 
+robot_image = np.array(Image.open("robot.png"))
 
 def create_env():
     env = gym.make('CarRacing-v0').unwrapped
     env.mode = 'fast'
     env.seed(0)
     return env
-
 
 def get_screen(env, player=None):
     if player:
@@ -89,33 +108,55 @@ def get_screen(env, player=None):
     return screen
 
 
-def display_screens(players):
+def display_screens(players, i_episode):
     start = time.time()
 
     full_screen = None
 
-    for player in players:
+    for i, player in enumerate(players):
         screen = player.screen #.env.render(mode='rgb_array') #.transpose((1, 0, 2))
+        channels, height, width = screen.shape
+        border = np.zeros((3, height, 10), dtype=np.uint8) # black border for divider
+
+        lrp_output = cv2.resize(player.lrp_output, dsize=(width, height), interpolation=cv2.INTER_CUBIC) # maybe INTER_NEAREST instead?
+        # Repeat to make RGB channels
+        lrp_output = np.repeat(lrp_output[:,:,np.newaxis], repeats=3, axis=2)
+        lrp_output = lrp_output.transpose((2, 0, 1))
+
+        # Normalize
+        lrp_output /= lrp_output.max()
+        lrp_output[lrp_output < 0] = 0
+
+        lrp_output = (lrp_output * 255).astype(np.uint8)
+
+        screen = np.concatenate((screen, border, lrp_output), axis=2)
+
+        # Add robot
+        if i == 1:
+            robot_h, robot_w, c = robot_image.shape
+            screen[:, :robot_h, :robot_w,] = robot_image[:,:,:3].transpose((2, 0, 1)) # Omit A channel
 
         if full_screen is None:
             full_screen = screen
         else:
-            border_width = 10
-            height = full_screen.shape[1]
-            border = np.zeros((3, height, border_width), dtype=np.uint8)
+            full_screen = np.concatenate((full_screen, screen), axis=1)
 
-            full_screen = np.concatenate((full_screen, border, screen), axis=2)
-
-    # TODO: Rewrite this to display in whatever UI library is being used
     full_screen = full_screen.transpose((1, 2, 0))
+
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
-    cv2.imshow('image', full_screen)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(full_screen, f'Episode {i_episode+1}', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
+
+    name = 'VROOM VROOM'
+    cv2.namedWindow(name)
+    cv2.moveWindow(name, 100, 100)
+    cv2.imshow(name, full_screen)
     cv2.waitKey(1)
 
     print("Time taken to render: {:.3f}s".format(time.time() - start))
 
-
-def create_player(load_weights=True):
+def create_player(load_weights=True, user_model=False):
     env = create_env()
     env.reset()
 
@@ -123,16 +164,24 @@ def create_player(load_weights=True):
     # returned from AI gym. Typical dimensions at this point are close to 3x40x90
     # which is the result of a clamped and down-scaled render buffer in get_screen()
     init_screen = get_screen(env)
-    _, _, screen_height, screen_width = init_screen.shape
+    _, n_channels, screen_height, screen_width = init_screen.shape # 3, 40, 60
 
-    policy_net = DQN(screen_height, screen_width, n_actions).to(device)
-    model_dir = "semi_successful_models"
-    model_file_name = "manual30_ep30.pth"
-    policy_net.eval()
-    target_net = DQN(screen_height, screen_width, n_actions).to(device)
-    target_net.eval()
+    if user_model:
+        policy_net = DQNUser(screen_height, screen_width, n_actions,
+                             KERNEL_SIZE, N_LAYERS).to(device)
+        policy_net.eval()
+        target_net = DQNUser(screen_height, screen_width, n_actions,
+                             KERNEL_SIZE, N_LAYERS).to(device)
+        target_net.eval()
+    else:
+        policy_net = DQN(screen_height, screen_width, n_actions).to(device)
+        policy_net.eval()
+        target_net = DQN(screen_height, screen_width, n_actions).to(device)
+        target_net.eval()
 
     if load_weights:
+        model_dir = "semi_successful_models"
+        model_file_name = "manual30_ep30.pth"
         policy_net.load_state_dict(torch.load(f"{model_dir}/{model_file_name}", map_location='cpu'))
         target_net.load_state_dict(policy_net.state_dict())
 
@@ -160,8 +209,21 @@ def select_action(player, state):
             # found, so we pick action with the larger expected reward.
             selected_action = player.policy_net(player.state).max(1)[1].item()
 
-    return selected_action
+    if player.model_keras:
+        start = time.time()
+        global num_photos
+        num_photos += 1
+        save_interval = 1
 
+        if num_photos % save_interval == 0:
+            player_state = player.state.cpu().numpy()
+            output = innvestigate_input(player.analyzer, player_state)  # shape [n, h, w, c]
+
+            player.lrp_output = output[0]
+
+        # print("Took {:.3f}s for lrp".format(time.time() - start))
+
+    return selected_action
 
 def optimize_model(player):
     if len(player.memory) < BATCH_SIZE or len(player.fake_memory) < BATCH_SIZE:
@@ -214,6 +276,7 @@ def optimize_model(player):
     player.optimizer.step()
     player.scheduler.step()
 
+
 def step_player(player, player_done, fake_action):
     env = player.env
     real_action_idx = select_action(player, player.state)
@@ -224,31 +287,27 @@ def step_player(player, player_done, fake_action):
     if fake_action_available:
         print("Inputting fake action for imitation")
 
-    # if not fake_action_available:
     _, reward, done, _ = env.step(real_action)
-    # else:
-    #     _, reward, done, _ = env.step(fake_action)
-
-    if(reward<0):
+    if reward < 0:
         player.consecutive_noreward += 1
     else:
         player.consecutive_noreward = 0
 
-    if(player.consecutive_noreward > 50):
+    if player.consecutive_noreward > 50:
         if player.total_reward < 750:
             reward -= 100
         done = True
 
-    if fake_action_available:
-        if real_action_idx == fake_action_idx:
-            reward += IMITATION_REWARD
-        else:
-            reward -= IMITATION_REWARD
+    if real_action_idx == fake_action_idx:
+        reward += IMITATION_REWARD
+    else:
+        reward -= IMITATION_REWARD
     player.total_reward += reward
 
     # Observe new state
     last_screen = player.screen_tensor
     current_screen = get_screen(env, player)
+    player.screen_tensor = current_screen
 
     if not done:
         next_state = current_screen - last_screen
@@ -267,25 +326,26 @@ def step_player(player, player_done, fake_action):
     # Move to the next state
     player.state = next_state
 
-    # Perform one step of the optimization (on the target network)
-    # optimize_model(player)
+    if do_optimize:
+        optimize_model(player)
+    else:
+        print('NOT PERFORMING OPTIMIZATION')
 
     return done
 
 def train():
     os.makedirs(snapshot_dir, exist_ok=True)
-    save_every = 20  # Save every 100 episodes
-    display_interval = 2  # Display every 50 episodes
-    num_episodes = 300
-
-    player1 = create_player()
-    # player2 = create_player(load_weights=False)
-    players = [player1]#, player2]
+    player1 = create_player(load_weights=False, user_model=True)
+    player2 = create_player(load_weights=False)
+    players = [player1, player2]
 
     fake_action = np.zeros(3)
     fake_action_listener(player1.env, fake_action)
 
-    episode_rewards = []
+    save_every = 100  # Save every 100 episodes
+    display_interval = 1  # Display every 2 steps
+    num_episodes = 3000
+
     for i_episode in range(num_episodes):
         global steps_done
         steps_done += 1
@@ -325,35 +385,30 @@ def train():
                     print(f"Episode {i_episode} with {t} length took {time.time()-start}s "
                           f"and scored {player.total_reward}")
 
-                    # Only track rewards for user
-                    if player == player1:
-                        episode_rewards.append(player.total_reward)
-
                     player_done[player_i] = True
 
-            # if t % display_interval == 0: # or i_episode < 100:
-            #     display_screens(players)
-            plot_rewards(episode_rewards, "epoch30")
+            if t % display_interval == 0:  # or i_episode < 100:
+                display_screens(players, i_episode)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
             for player in players:
                 player.target_net.load_state_dict(player.policy_net.state_dict())
 
-        current_reward = np.mean(episode_rewards[-100:-1])
-
         # Save for user
         if i_episode % save_every == 0 and i_episode > 0:
-            filename = f'{snapshot_dir}/target_episode{i_episode}_reward_{current_reward:.3f}.pth'
+            filename = f'{snapshot_dir}/target_episode{i_episode}.pth'
             torch.save(player1.target_net.state_dict(), filename)
-
+    
     print('Complete')
+
     for player in players:
         player.env.close()
 
 
 def fake_action_listener(env, fake_action):
     def key_press(k, mod):
+        print(k)
         if k == key.LEFT:
             fake_action[0] = -1.0
         elif k == key.RIGHT:
@@ -362,6 +417,9 @@ def fake_action_listener(env, fake_action):
             fake_action[1] = 1.0
         elif k == key.DOWN:
             fake_action[2] = 0.8  # set 1.0 for wheels to block to zero rotation
+        elif k == key.SPACE:
+            global do_optimize
+            do_optimize = not do_optimize
 
     def key_release(k, mod):
         if k == key.LEFT and fake_action[0] == -1.0:
@@ -406,3 +464,4 @@ def action_to_index(action: np.ndarray) -> int:
 
 if __name__ == "__main__":
     train()
+
