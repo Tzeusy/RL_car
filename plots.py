@@ -2,11 +2,11 @@ import matplotlib.pyplot as plt
 import torch
 
 
-def plot_rewards(episode_rewards):
+def plot_rewards(episode_rewards, title):
     plt.figure(2)
     plt.clf()
     rewards = torch.tensor(episode_rewards, dtype=torch.float)
-    plt.title('Training...')
+    plt.title(title)
     plt.xlabel('Episode')
     plt.ylabel('Duration')
     plt.plot(rewards.numpy())

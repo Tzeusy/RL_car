@@ -226,7 +226,7 @@ def test():
         for model in models:
             pi, _ = model(state)
             votes.append(pi.argmax().item())
-        action_idx = Counter(votes).most_common(1)
+        action_idx = Counter(votes).most_common(1)[0][0]
         action = index_to_action(action_idx)
         state, reward, done, _ = env.step(action)
         env.render()
@@ -241,4 +241,4 @@ def test():
 
 
 if __name__ == '__main__':
-    train()
+    test()
