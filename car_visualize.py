@@ -22,7 +22,6 @@ from plots import plot_rewards
 import keras
 import innvestigate
 import scipy.misc
-from pyg import ImageWindow
 import pyglet
 
 def innvestigate_input(analyzer, input: np.ndarray):
@@ -78,7 +77,6 @@ def create_env():
     env.seed(0)
     return env
 
-
 def get_screen(env, player=None):
     if player:
         env = player.env
@@ -105,7 +103,7 @@ def get_screen(env, player=None):
     return screen
 
 
-def display_screens(image_window, players):
+def display_screens(players):
     start = time.time()
 
     full_screen = None
@@ -134,7 +132,6 @@ def display_screens(image_window, players):
     # TODO: Rewrite this to display in whatever UI library is being used
     full_screen = full_screen.transpose((1, 2, 0))
 
-    # image_window.update()
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
     cv2.imshow('image', full_screen)
 
@@ -332,16 +329,9 @@ def train():
     player2 = create_player()
     players = [player1, player2]
 
-    image_window = ImageWindow()
-
     fake_action = np.zeros(3)
-    fake_action_listener(image_window, fake_action)
-    
-    # def main_event(value):
-    #     while True:
-    #         window.switch_to()
-    #         image_window.update()
-    #         image_window.on_draw()
+    fake_action_listener(player1.env, fake_action)
+
     save_every = 20  # Save every 100 episodes
     display_interval = 2  # Display every 2 steps
     num_episodes = 3000
@@ -388,8 +378,7 @@ def train():
                     player_done[player_i] = True
 
             if i_episode % display_interval == 0: # or i_episode < 100:
-                # image_window.update()
-                display_screens(image_window, players)
+                display_screens(players)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
@@ -400,14 +389,6 @@ def train():
         if i_episode % save_every == 0 and i_episode > 0:
             filename = f'{snapshot_dir}/target_episode{i_episode}.pth'
             torch.save(player1.target_net.state_dict(), filename)
-
-    # def render(value):
-    #     print("Rendering")
-    #     image_window.update()
-    #     display_screens(image_window, players)
-    # pyglet.clock.schedule_interval(render, 0.1)
-    # pyglet.clock.schedule_once(main_event, 0.1)
-    # pyglet.app.run()
     
     print('Complete')
 
@@ -415,7 +396,7 @@ def train():
         player.env.close()
 
 
-def fake_action_listener(window, fake_action):
+def fake_action_listener(env, fake_action):
     def key_press(k, mod):
         print(k)
         if k == key.LEFT:
@@ -437,10 +418,8 @@ def fake_action_listener(window, fake_action):
         elif k == key.DOWN:
             fake_action[2] = 0.0
 
-    window.on_key_press = key_press
-    window.on_key_release = key_release
-    # env.viewer.window.on_key_press = key_press
-    # env.viewer.window.on_key_release = key_release
+    env.viewer.window.on_key_press = key_press
+    env.viewer.window.on_key_release = key_release
 
 
 def index_to_action(action_index: int) -> np.ndarray:
