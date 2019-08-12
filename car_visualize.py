@@ -58,6 +58,7 @@ TARGET_UPDATE = 30
 MAX_EPISODE_LENGTH = 2000
 LEARNING_RATE = 5e-3
 REPLAY_MEM = 90000
+IMITATION_REWARD = 5
 snapshot_dir = "snapshots"
 
 # Get number of actions from gym action space
@@ -284,9 +285,9 @@ def step_player(player, player_done, fake_action):
         done = True
 
     if real_action_idx == fake_action_idx:
-        reward += 5
+        reward += IMITATION_REWARD
     else:
-        reward -= 5
+        reward -= IMITATION_REWARD
     player.total_reward += reward
 
     # Observe new state

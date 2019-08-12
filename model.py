@@ -2,7 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import numpy as np
+import innvestigate
+from pytorch2keras.converter import pytorch_to_keras
+
 from collections import namedtuple
+from functools import reduce
 import random
 
 Transition = namedtuple('Transition',
@@ -31,8 +36,8 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
-class DQN(nn.Module):
 
+class DQN(nn.Module):
     def __init__(self, h, w, outputs):
         super(DQN, self).__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=2)
@@ -52,7 +57,7 @@ class DQN(nn.Module):
         convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(conv2d_size_out(h))))
         linear_input_size = convw * convh * 128
         self.head_1 = nn.Linear(linear_input_size, 16)
-        self.head_2 = nn.Linear(16, 5)
+        self.head_2 = nn.Linear(16, outputs)
 
     # Called with either one element to determine next action, or a batch
     # during optimization. Returns tensor([[left0exp,right0exp]...]).
@@ -87,10 +92,6 @@ class DqnNoFc(nn.Module):
         x = x.view(x.size(0), -1)
         return x
 
-
-import numpy as np
-import innvestigate
-from pytorch2keras.converter import pytorch_to_keras
 
 def torch_to_keras(model, image_shape):
     """
@@ -132,3 +133,44 @@ class Player(object):
         self.analyzer = innvestigate.create_analyzer(name, self.model_keras)
 
 
+class DQNUser(nn.Module):
+    def __init__(self, h, w, outputs, ksize, n_layers):
+        super().__init__()
+        self.n_layers = n_layers
+
+        n_filters = 16
+        self.conv = [nn.Conv2d(3, n_filters, kernel_size=ksize, stride=2)]
+        self.bn = [nn.BatchNorm2d(n_filters)]
+
+        for i in range(1, n_layers):
+            in_filters = n_filters * 2**(i-1)
+            out_filters = n_filters * 2**i
+            self.conv.append(nn.Conv2d(in_filters, out_filters,
+                                       kernel_size=ksize, stride=2))
+            self.bn.append(nn.BatchNorm2d(out_filters))
+
+        self.conv = nn.ModuleList(self.conv)
+        self.bn = nn.ModuleList(self.bn)
+
+        # Number of Linear input connections depends on output of conv2d layers
+        # and therefore the input image size,    so compute it.
+        def conv2d_size_out(size, kernel_size=ksize, stride=2):
+            return (size - (kernel_size - 1) - 1) // stride + 1
+
+        convw = reduce(lambda convw, _: conv2d_size_out(convw), range(n_layers), w)
+        convh = reduce(lambda convh, _: conv2d_size_out(convh), range(n_layers), h)
+        linear_input_size = convw * convh * n_filters * 2**(n_layers-1)
+        self.head_1 = nn.Linear(linear_input_size, 16)
+        self.head_2 = nn.Linear(16, outputs)
+
+    def forward(self, x):
+        for i, (conv, bn) in enumerate(zip(self.conv, self.bn)):
+            if i == self.n_layers-1:
+                x = bn(conv(x))
+            else:
+                x = F.relu(bn(conv(x)))
+
+        x = torch.sigmoid(x)
+        x = self.head_1(x.view(x.size(0), -1))
+        x = self.head_2(x)
+        return x

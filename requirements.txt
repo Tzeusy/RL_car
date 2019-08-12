@@ -8,3 +8,4 @@ tqdm
 gym[box2d]
 pytorch2keras
 innvestigate
+pyqt5
