@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import QApplication
 from ui import Main
 
-import car
+import car_visualize as car
 
 
 def app():
