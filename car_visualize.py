@@ -105,7 +105,7 @@ def get_screen(env, player=None):
     return screen
 
 
-def display_screens(players):
+def display_screens(players, i_episode):
     start = time.time()
 
     full_screen = None
@@ -141,6 +141,10 @@ def display_screens(players):
     full_screen = full_screen.transpose((1, 2, 0))
 
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(full_screen, f'Episode {i_episode+1}', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
+
     cv2.imshow('image', full_screen)
     cv2.waitKey(1)
 
@@ -371,7 +375,7 @@ def train():
                     player_done[player_i] = True
 
             if i_episode % display_interval == 0: # or i_episode < 100:
-                display_screens(players)
+                display_screens(players, i_episode)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
