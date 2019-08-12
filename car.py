@@ -109,6 +109,7 @@ def display_screens(players):
     full_screen = full_screen.transpose((1, 2, 0))
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
     cv2.imshow('image', full_screen)
+    cv2.waitKey(1)
 
     print("Time taken to render: {:.3f}s".format(time.time() - start))
 

@@ -134,6 +134,7 @@ def display_screens(players):
 
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
     cv2.imshow('image', full_screen)
+    cv2.waitKey(1)
 
     print("Time taken to render: {:.3f}s".format(time.time() - start))
 
@@ -274,10 +275,10 @@ def step_player(player, player_done, fake_action):
     if fake_action_available:
         print("Inputting fake action for imitation")
 
-    # if not fake_action_available:
-    _, reward, done, _ = env.step(real_action)
-    # else:
-    #     _, reward, done, _ = env.step(fake_action)
+    if not fake_action_available:
+        _, reward, done, _ = env.step(real_action)
+    else:
+        _, reward, done, _ = env.step(fake_action)
 
     if(reward<0):
         player.consecutive_noreward += 1
@@ -289,11 +290,10 @@ def step_player(player, player_done, fake_action):
             reward -= 100
         done = True
 
-    if fake_action_available:
-        if real_action_idx == fake_action_idx:
-            reward += 5
-        else:
-            reward -= 5
+    if real_action_idx == fake_action_idx:
+        reward += 5
+    else:
+        reward -= 5
     player.total_reward += reward
 
     # Observe new state
@@ -326,7 +326,7 @@ def train():
     os.makedirs(snapshot_dir, exist_ok=True)
     player1 = create_player(load_weights=False)
     player1.model_keras = None
-    player2 = create_player()
+    player2 = create_player(load_weights=False)
     players = [player1, player2]
 
     fake_action = np.zeros(3)
