@@ -66,6 +66,7 @@ n_actions = 5  # env.action_space.shape[0]
 
 steps_done = 0
 num_photos = 0
+do_optimize = True
 
 resize = T.Compose([T.ToPILImage(),
                     T.Resize(40, interpolation=Image.CUBIC),
@@ -276,17 +277,13 @@ def step_player(player, player_done, fake_action):
     if fake_action_available:
         print("Inputting fake action for imitation")
 
-    # if not fake_action_available:
     _, reward, done, _ = env.step(real_action)
-    # else:
-        # _, reward, done, _ = env.step(fake_action)
-
-    if(reward<0):
+    if reward < 0:
         player.consecutive_noreward += 1
     else:
         player.consecutive_noreward = 0
 
-    if(player.consecutive_noreward > 50):
+    if player.consecutive_noreward > 50:
         if player.total_reward < 750:
             reward -= 100
         done = True
@@ -319,7 +316,10 @@ def step_player(player, player_done, fake_action):
     # Move to the next state
     player.state = next_state
 
-    optimize_model(player)
+    if do_optimize:
+        optimize_model(player)
+    else:
+        print('NOT PERFORMING OPTIMIZATION')
 
     return done
 
@@ -407,6 +407,9 @@ def fake_action_listener(env, fake_action):
             fake_action[1] = 1.0
         elif k == key.DOWN:
             fake_action[2] = 0.8  # set 1.0 for wheels to block to zero rotation
+        elif k == key.SPACE:
+            global do_optimize
+            do_optimize = not do_optimize
 
     def key_release(k, mod):
         if k == key.LEFT and fake_action[0] == -1.0:
