@@ -1,5 +1,7 @@
 ## Description
-Implementation of reinforcement learning for the OpenAI gym's Car-racing environment (https://github.com/openai/gym/blob/master/gym/envs/box2d/car_racing.py)
+The OpenAI Car Racing gym environment is a reinforcement learning (RL) task in which a car is trained to navigate a randomly generated racetrack. It is a continuous control image-based task, and its complexity makes it one of the more challenging environments to develop RL agents for.
+
+In our 50.021 Artificial Intelligence project, we investigated differing approaches to creating an effective generalizable model, and an interactive GUI for user interpretation of model and parameter efficacy. Approaches taught during the AI class such as Double Deep Q-Learning, Policy Gradient, Advantage Actor-Critic (A2C), and Imitation Learning are used. We analyze the accompanying results, and build a system for contrasting efficacy of models. This application allows human players to observe in real-time the impact of parameter changes or imitation-based suggested movements.
 
 ## Requirements
 * Python 3.6+

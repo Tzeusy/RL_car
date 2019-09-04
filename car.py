@@ -118,8 +118,9 @@ def display_screens(players, i_episode):
         lrp_output = lrp_output.transpose((2, 0, 1))
 
         # Normalize
+        lrp_output -= lrp_output.min()
         lrp_output /= lrp_output.max()
-        lrp_output[lrp_output < 0] = 0
+        # lrp_output[lrp_output < 0] = 0
 
         lrp_output = (lrp_output * 255).astype(np.uint8)
 
