@@ -1,7 +1,9 @@
 ## Description
 The OpenAI Car Racing gym environment is a reinforcement learning (RL) task in which a car is trained to navigate a randomly generated racetrack. It is a continuous control image-based task, and its complexity makes it one of the more challenging environments to develop RL agents for.
 
-In our 50.021 Artificial Intelligence project, we investigated differing approaches to creating an effective generalizable model, and an interactive GUI for user interpretation of model and parameter efficacy. Approaches taught during the AI class such as Double Deep Q-Learning, Policy Gradient, Advantage Actor-Critic (A2C), and Imitation Learning are used. We analyze the accompanying results, and build a system for contrasting efficacy of models. This application allows human players to observe in real-time the impact of parameter changes or imitation-based suggested movements.
+In our 50.021 Artificial Intelligence project, we investigated differing approaches to creating an effective generalizable model, and an interactive GUI for user interpretation of model and parameter efficacy. Approaches taught during the AI class such as Double Deep Q-Learning, Policy Gradient, Advantage Actor-Critic (A2C), and Imitation Learning are used. We analyze the accompanying results, and build a system for contrasting efficacy of models.
+
+Our main results found that in such a complex continuous environment, human input as a prior for the model is essential in speeding up learning. This application allows human players to observe in real-time the impact of parameter changes or imitation-based suggested movements.
 
 ## Requirements
 * Python 3.6+
@@ -10,13 +12,13 @@ In our 50.021 Artificial Intelligence project, we investigated differing approac
 
 ## Instructions
 ### Original
-Run `car.py`
+Run `car.py` to execute the original application with a controllable model.
 
 - You can use controls during the rendered episodes by using the arrow keys. This will override model-derived suggestions for the car in environment steps. If this is done, if the model-derived suggestion is different from user input, the model receives a negative penalty (similar to imitation learning). If no input is received, model proceeds with learning via Double Deep Q Learning, rewards derived from the OpenAI gym environment. Vary parameters as desired (or scale of rewards to change weightages as necessary)
 - Different storage buffers are used for user-input and model-input state changes. This allows the user to, for example, train for only the first few episodes, and have these inputs be stored in memory for the duration of the program running, while the model cycles through its FIFO memory.
 
 ### With UI
-Run `ui.py`  
+This is our main application. Run `python ui.py` to execute.
 
 Use the UI to set your desired hyperparameters, then hit the 'Start' button.
 
