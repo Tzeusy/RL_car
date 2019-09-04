@@ -17,11 +17,7 @@ from itertools import count
 from enum import Enum
 
 from model import DQN, DQNUser, ReplayMemory, Transition, Player
-from plots import plot_rewards
 
-import keras
-import innvestigate
-import scipy.misc
 
 def innvestigate_input(analyzer, input: np.ndarray):
     """
@@ -68,13 +64,14 @@ n_actions = 5  # env.action_space.shape[0]
 
 steps_done = 0
 num_photos = 0
-do_optimize = True
+do_optimize = False
 
 resize = T.Compose([T.ToPILImage(),
                     T.Resize(40, interpolation=Image.CUBIC),
                     T.ToTensor()])
 
-robot_image = np.array(Image.open("robot.png"))
+robot_image = np.array(Image.open("images/robot.png"))
+
 
 def create_env():
     env = gym.make('CarRacing-v0').unwrapped
@@ -82,11 +79,11 @@ def create_env():
     env.seed(0)
     return env
 
+
 def get_screen(env, player=None):
     if player:
         env = player.env
 
-    start = time.time()
     # Returned screen requested by gym is 400x600x3, but is sometimes larger
     # such as 800x1200x3. Transpose it into torch order (CHW).
     screen = env.render(mode='rgb_array').transpose((2, 0, 1))
@@ -103,24 +100,21 @@ def get_screen(env, player=None):
     screen = torch.from_numpy(screen)
     # Resize, and add a batch dimension (BCHW)
     screen = resize(screen).unsqueeze(0).to(device)
-
-    # print("{:.3f}s taken for get_screen".format(time.time() - start))
     return screen
 
 
 def display_screens(players, i_episode):
-    start = time.time()
-
     full_screen = None
 
     for i, player in enumerate(players):
-        screen = player.screen #.env.render(mode='rgb_array') #.transpose((1, 0, 2))
+        screen = player.screen
         channels, height, width = screen.shape
-        border = np.zeros((3, height, 10), dtype=np.uint8) # black border for divider
+        border = np.zeros((3, height, 10), dtype=np.uint8)  # black border for divider
 
-        lrp_output = cv2.resize(player.lrp_output, dsize=(width, height), interpolation=cv2.INTER_CUBIC) # maybe INTER_NEAREST instead?
+        lrp_output = cv2.resize(player.lrp_output, dsize=(width, height),
+                                interpolation=cv2.INTER_CUBIC)  # maybe INTER_NEAREST instead?
         # Repeat to make RGB channels
-        lrp_output = np.repeat(lrp_output[:,:,np.newaxis], repeats=3, axis=2)
+        lrp_output = np.repeat(lrp_output[:, :, np.newaxis], repeats=3, axis=2)
         lrp_output = lrp_output.transpose((2, 0, 1))
 
         # Normalize
@@ -134,7 +128,7 @@ def display_screens(players, i_episode):
         # Add robot
         if i == 1:
             robot_h, robot_w, c = robot_image.shape
-            screen[:, :robot_h, :robot_w,] = robot_image[:,:,:3].transpose((2, 0, 1)) # Omit A channel
+            screen[:, :robot_h, :robot_w,] = robot_image[:,:,:3].transpose((2, 0, 1))  # Omit A channel
 
         if full_screen is None:
             full_screen = screen
@@ -142,19 +136,20 @@ def display_screens(players, i_episode):
             full_screen = np.concatenate((full_screen, screen), axis=1)
 
     full_screen = full_screen.transpose((1, 2, 0))
-
     full_screen = cv2.cvtColor(full_screen, cv2.COLOR_RGB2BGR)
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     cv2.putText(full_screen, f'Episode {i_episode+1}', (10, 30), font, 1, (255,255,255), 2, cv2.LINE_AA)
 
+    text = 'Training model...' if do_optimize else 'Weights frozen!'
+    cv2.putText(full_screen, text, (300, 30), font, 0.5, (255,255,255), 1, cv2.LINE_AA)
+
     name = 'VROOM VROOM'
     cv2.namedWindow(name)
-    cv2.moveWindow(name, 100, 100)
+    cv2.moveWindow(name, 100, 50)
     cv2.imshow(name, full_screen)
     cv2.waitKey(1)
 
-    print("Time taken to render: {:.3f}s".format(time.time() - start))
 
 def create_player(load_weights=True, user_model=False):
     env = create_env()
@@ -180,8 +175,8 @@ def create_player(load_weights=True, user_model=False):
         target_net.eval()
 
     if load_weights:
-        model_dir = "semi_successful_models"
-        model_file_name = "manual30_ep30.pth"
+        model_dir = "models"
+        model_file_name = "mean100_659.pth"
         policy_net.load_state_dict(torch.load(f"{model_dir}/{model_file_name}", map_location='cpu'))
         target_net.load_state_dict(policy_net.state_dict())
 
@@ -193,7 +188,8 @@ def create_player(load_weights=True, user_model=False):
     player = Player(env, policy_net, target_net, optimizer, scheduler, memory, fake_memory)
     return player
 
-def select_action(player, state):
+
+def select_action(player):
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * \
                     np.exp(-1. * steps_done / EPS_DECAY)
@@ -210,7 +206,6 @@ def select_action(player, state):
             selected_action = player.policy_net(player.state).max(1)[1].item()
 
     if player.model_keras:
-        start = time.time()
         global num_photos
         num_photos += 1
         save_interval = 1
@@ -221,9 +216,8 @@ def select_action(player, state):
 
             player.lrp_output = output[0]
 
-        # print("Took {:.3f}s for lrp".format(time.time() - start))
-
     return selected_action
+
 
 def optimize_model(player):
     if len(player.memory) < BATCH_SIZE or len(player.fake_memory) < BATCH_SIZE:
@@ -277,17 +271,19 @@ def optimize_model(player):
     player.scheduler.step()
 
 
-def step_player(player, player_done, fake_action):
+def step_player(player, fake_action):
     env = player.env
-    real_action_idx = select_action(player, player.state)
+    real_action_idx = select_action(player)
     real_action = index_to_action(real_action_idx)
 
     fake_action_idx = action_to_index(fake_action)
     fake_action_available = fake_action_idx != Actions.NOTHING.value
     if fake_action_available:
-        print("Inputting fake action for imitation")
+        print("Inputting fake action for imitation:", Actions(fake_action_idx))
+        _, reward, done, _ = env.step(fake_action)
+    else:
+        _, reward, done, _ = env.step(real_action)
 
-    _, reward, done, _ = env.step(real_action)
     if reward < 0:
         player.consecutive_noreward += 1
     else:
@@ -328,14 +324,12 @@ def step_player(player, player_done, fake_action):
 
     if do_optimize:
         optimize_model(player)
-    else:
-        print('NOT PERFORMING OPTIMIZATION')
 
     return done
 
 def train():
     os.makedirs(snapshot_dir, exist_ok=True)
-    player1 = create_player(load_weights=False, user_model=True)
+    player1 = create_player(load_weights=True, user_model=False)
     player2 = create_player(load_weights=False)
     players = [player1, player2]
 
@@ -367,7 +361,6 @@ def train():
 
             player.total_reward = 0  # TODO: Update to be playerwise
             player.consecutive_noreward = 0
-            # action_barchart = np.zeros(n_actions)
 
         # Keeps track of which players are done with the current episode
         player_done = [False for p in players]
@@ -378,9 +371,9 @@ def train():
             for player_i, player in enumerate(players):
                 if player_done[player_i]:
                     continue
-                done = step_player(player, player_done, fake_action)
+                done = step_player(player, fake_action)
 
-                if (done or t > MAX_EPISODE_LENGTH):
+                if done or t > MAX_EPISODE_LENGTH:
                     player.state = None
                     print(f"Episode {i_episode} with {t} length took {time.time()-start}s "
                           f"and scored {player.total_reward}")
@@ -408,7 +401,7 @@ def train():
 
 def fake_action_listener(env, fake_action):
     def key_press(k, mod):
-        print(k)
+        # print(k)
         if k == key.LEFT:
             fake_action[0] = -1.0
         elif k == key.RIGHT:
