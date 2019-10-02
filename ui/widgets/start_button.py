@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton
+from PyQt5.QtWidgets import QWidget, QGridLayout, QPushButton, QCheckBox
 
 
 class StartButton(QWidget):
@@ -8,6 +8,9 @@ class StartButton(QWidget):
         self.button = QPushButton('VROOM VROOM')
         self.button.setDefault(True)
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.button)
+        self.checkbox = QCheckBox('Freeze weights?')
+
+        layout = QGridLayout()
+        layout.addWidget(self.button, 1, 1, 1, 3)
+        layout.addWidget(self.checkbox, 1, 4, 1, 1)
         self.setLayout(layout)
